@@ -610,10 +610,8 @@ var TV = (function () {
 
     /** Back on the first screen: back to wherever the person came from. */
     back: function () {
-      if (samsung) {
-        try { window.tizen.application.getCurrentApplication().hide(); } catch (e) {}
-        return;
-      }
+      // Samsung: stay on Free My TV instead of hiding it (Home and Exit still leave).
+      if (samsung) return;
       if (window.PalmSystem && window.PalmSystem.platformBack) window.PalmSystem.platformBack();
     },
 
