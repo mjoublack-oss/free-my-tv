@@ -197,7 +197,9 @@ body.yt-empty #clock { display: none; }
 }
 #art.on { opacity: 1; visibility: visible; -webkit-transition: opacity 0.8s; transition: opacity 0.8s; }
 #art .stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
-#art .piece { position: absolute; opacity: 0; -webkit-transition: opacity 2s; transition: opacity 2s; }
+#art .piece { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; opacity: 0; -webkit-transition: opacity 2s; transition: opacity 2s; }
+/* Full screen: a soft falloff at the edges, as paint under room light, instead of a mat. */
+#art .edge { position: absolute; left: 0; top: 0; width: 100%; height: 100%; box-shadow: inset 0 0 160px rgba(40, 30, 20, 0.28); }
 #art .piece.on { opacity: 1; }
 #art .canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-size: cover; background-position: center; }
 /* Canvas weave: two fine crossing stripes, barely there. */
@@ -219,7 +221,8 @@ body.yt-empty #clock { display: none; }
   text-align: center;
   font-size: 22px;
   letter-spacing: 0.04em;
-  color: rgba(60, 52, 42, 0.75);
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
   opacity: 0;
   -webkit-transition: opacity 1.5s;
   transition: opacity 1.5s;

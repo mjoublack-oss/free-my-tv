@@ -4,8 +4,9 @@
  *    allows read-only access (youtube.readonly). The refresh token stays in this TV's localStorage.
  *  - The client (CONFIG.youtube: id and secret, a "TVs and Limited Input devices" client in the person's own Google
  *    Cloud project) is packed in at build time from youtube.local.json, which git leaves out.
- *  - Every hour: the subscriptions, then each channel's newest uploads without Shorts (its "UULF" playlist), the last
- *    7 days, newest first. About 1 + channels/50 + channels requests an hour, well inside YouTube's 10,000 a day.
+ *  - Every hour: the subscriptions (in YouTube's relevance order), the person's recently liked videos, then each
+ *    channel's newest uploads without Shorts (its "UULF" playlist) from the last 7 days, ranked by rank() below. About
+ *    2 + channels/50 + channels requests an hour, well inside YouTube's 10,000 a day. The refresh button pages through.
  * Plain ES5, like the rest of web/.
  */
 var YouTube = (function () {
@@ -14,7 +15,7 @@ var YouTube = (function () {
   var CLIENT = (window.CONFIG && window.CONFIG.youtube) || {};
   var SCOPE = 'https://www.googleapis.com/auth/youtube.readonly';
   var API = 'https://www.googleapis.com/youtube/v3';
-  var EVERY = 60 * 60000, DAYS = 7, MAX = 18;
+  var EVERY = 60 * 60000, DAYS = 7, MAX = 60, PAGE = 12, page = 0;
 
   function store(key, value) { try { localStorage.setItem('fmtv.yt.' + key, JSON.stringify(value)); } catch (e) {} }
   function stored(key) { try { return JSON.parse(localStorage.getItem('fmtv.yt.' + key)); } catch (e) { return null; } }
@@ -160,10 +161,46 @@ var YouTube = (function () {
         var at = Date.parse((o.items[i].contentDetails && o.items[i].contentDetails.videoPublishedAt) || s.publishedAt);
         if (!id || !(at >= since) || s.title === 'Private video' || s.title === 'Deleted video') continue;
         out.push({id: id, kind: 'youtube', video: id, title: s.title, channel: s.videoOwnerChannelTitle || s.channelTitle,
-          at: at, poster: thumb(s.thumbnails), backdrop: thumb(s.thumbnails), app: 'youtube', detailed: true});
+          channelId: channel, at: at, poster: thumb(s.thumbnails), backdrop: thumb(s.thumbnails), app: 'youtube', detailed: true});
       }
       done(out);
     });
+  }
+
+  /** How many of the person's recently liked videos each channel made: {channelId: count} (one request; {} on failure). */
+  function likedChannels(done) {
+    api('/videos?part=snippet&myRating=like&maxResults=50', function (err, o) {
+      var out = {};
+      for (var i = 0; !err && o && o.items && i < o.items.length; i++) {
+        var c = o.items[i].snippet && o.items[i].snippet.channelId;
+        if (c) out[c] = (out[c] || 0) + 1;
+      }
+      done(out);
+    });
+  }
+
+  /**
+   * YouTube's own home feed isn't open to apps, so this is the closest from what is: the subscriptions in YouTube's
+   * "relevance" order (the channels the person watches most come first), the channels of the videos they liked, and how
+   * new each video is. At most two videos a channel, so one channel can't fill the row.
+   */
+  function rank(found, channels, likes) {
+    var place = {}, n = Math.max(1, channels.length), now = Date.now();
+    for (var i = 0; i < channels.length; i++) place[channels[i]] = i;
+    for (var k = 0; k < found.length; k++) {
+      var v = found[k], rel = place[v.channelId] === undefined ? 0 : 1 - place[v.channelId] / n;
+      var liked = Math.min(1, (likes[v.channelId] || 0) / 4), hours = (now - v.at) / 3600000;
+      v.score = 0.45 * rel + 0.3 * liked + 0.45 * Math.exp(-hours / 48);
+    }
+    found.sort(function (a, b) { return b.score - a.score; });
+    var out = [], per = {};
+    for (var j = 0; j < found.length && out.length < MAX; j++) {
+      var c = found[j].channelId;
+      if ((per[c] || 0) >= 2) continue;
+      per[c] = (per[c] || 0) + 1;
+      out.push(found[j]);
+    }
+    return out;
   }
 
   function refresh(force) {
@@ -174,6 +211,12 @@ var YouTube = (function () {
     fetching = true;
     subscriptions(function (err, channels) {
       if (err) { fetching = false; failedAt = Date.now(); status = "Couldn't read your subscriptions: " + err.message; changed(); return; }
+      likedChannels(function (likes) { collect(channels, likes); });
+    });
+  }
+
+  function collect(channels, likes) {
+    (function () {
       var since = Date.now() - DAYS * 864e5, found = [], next = 0, running = 0;
       function more() {
         // Six channels at a time.
@@ -189,9 +232,9 @@ var YouTube = (function () {
         if (!channels.length) finish();
       }
       function finish() {
-        found.sort(function (a, b) { return b.at - a.at; });
-        videos = found.slice(0, MAX);
+        videos = rank(found, channels, likes);
         videosAt = Date.now();
+        page = 0;
         fetching = false;
         failedAt = 0;
         status = videos.length ? '' : 'No new videos from your subscriptions in the last ' + DAYS + ' days.';
@@ -199,7 +242,7 @@ var YouTube = (function () {
         changed();
       }
       more();
-    });
+    })();
   }
 
   function ago(at) {
@@ -224,11 +267,15 @@ var YouTube = (function () {
       return {text: status || (fetching ? 'Loading your subscriptions…' : '')};
     },
     refresh: function () { refresh(false); },
-    reload: function () { refresh(true); },
-    /** The cards: the newest videos first, with the channel and how long ago. */
+    /** The refresh button: the next set at once; the list itself is read again when it's over 10 minutes old. */
+    reload: function () {
+      if (videos.length > PAGE) { page++; changed(); }
+      if (Date.now() - videosAt > 10 * 60000) refresh(true);
+    },
+    /** The cards: the set on screen (PAGE videos, best matches first), with the channel and how long ago. */
     cards: function () {
-      var out = [];
-      for (var i = 0; i < videos.length; i++) {
+      var out = [], pages = Math.max(1, Math.ceil(videos.length / PAGE)), first = (page % pages) * PAGE;
+      for (var i = first; i < videos.length && i < first + PAGE; i++) {
         var v = videos[i];
         out.push({id: v.id, kind: 'youtube', video: v.video, title: v.title, poster: v.poster, backdrop: v.backdrop,
           meta: v.channel + ' · ' + ago(v.at), app: 'youtube', detailed: true});

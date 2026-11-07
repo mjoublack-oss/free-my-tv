@@ -1,7 +1,7 @@
 /*
- * Art: the round button between Live TV and Settings shows paintings the way a Frame TV's Art Mode does. Each one sits
- * on a warm off-white mat with a thin bevel shadow, a little softer and warmer than a screen would draw it, with a faint
- * canvas grain, and dimmer as the evening comes (the TV's light sensor isn't open to apps: the city's sunrise and
+ * Art: the round button between Live TV and Settings shows paintings the way a Frame TV's Art Mode does: over the whole
+ * screen (landscape-format works only, so the crop stays small), a little softer and warmer than a screen would draw
+ * it, with a faint canvas grain and a soft falloff at the edges, and dimmer as the evening comes (the TV's light sensor isn't open to apps: the city's sunrise and
  * sunset stand in for the room's light). A new painting every 3 minutes; its title and painter for the first 45 seconds.
  * Any button goes back to the home screen.
  *
@@ -70,6 +70,24 @@ var Art = (function () {
   // MARK: - Showing them
 
   var on = false, timer = 0, captionTimer = 0, index = stored('index') || 0, layer = null;
+  var narrow = stored('narrow') || {};   // works found to be portrait-format, left out from then on
+
+  /**
+   * Landscapes and scenery only, by The Met's subject tags: at least one place-or-nature tag, and none of nudes, religious
+   * scenes or portraits (a living room, not a gallery's every room).
+   */
+  var SCENERY = /landscape|seascape|cityscape|river|pond|lake|sea\b|ocean|coast|beach|mountain|forest|tree|garden|water lil|bridge|field|harbor|harbour|village|snow|sunset|sunrise|cliff|valley|meadow|haystack|boat/i;
+  var NOT_HERE = /nude|bacchant|venus|nymph|christ|saint|virgin|madonna|crucifi|religio|biblical|angel|portrait|death|battle/i;
+  function scenery(o) {
+    var tags = (o.tags || []).map(function (t) { return t.term || ''; }).join(', ') + ', ' + (o.title || '');
+    return SCENERY.test(tags) && !NOT_HERE.test(tags);
+  }
+
+  function wide(id, yes) {
+    if (yes || narrow[id]) return;
+    narrow[id] = 1;
+    store('narrow', narrow);
+  }
 
   /** How bright the painting looks: as the room's light goes, from 0.95 at midday to 0.62 late at night. */
   function brightness() {
@@ -107,16 +125,21 @@ var Art = (function () {
     if (!on) return;
     clearTimeout(timer);
     if (!pool || !pool.ids.length) { loadPool(function () { if (pool && pool.ids.length) showNext(0); else caption('The paintings couldn\'t be loaded. Check the internet and try again.'); }); return; }
-    if (tries > 6) { timer = setTimeout(function () { showNext(0); }, 60000); return; }
+    if (tries > 25) { timer = setTimeout(function () { showNext(0); }, 60000); return; }
     var id = pool.ids[index++ % pool.ids.length];
     store('index', index);
+    if (narrow[id]) { showNext(tries); return; }   // a portrait-format work seen before: skipped without a request
     getJson(OBJECT + id, function (err, o) {
       if (!on) return;
       var src = !err && o && o.isPublicDomain && (o.primaryImageSmall || o.primaryImage);
       if (!src) { showNext(tries + 1); return; }
+      if (!scenery(o)) { wide(id, false); showNext(tries + 1); return; }   // not a landscape: left out from then on
       var img = new Image();
       img.onload = function () {
         if (!on) return;
+        // The painting fills the screen: only landscape-format works, so the crop to 16:9 stays small.
+        if (img.width / img.height < 1.2) { wide(id, false); showNext(tries + 1); return; }
+        wide(id, true);
         place(img, o);
         timer = setTimeout(function () { showNext(0); }, EVERY);
       };
@@ -125,21 +148,15 @@ var Art = (function () {
     });
   }
 
-  /** The painting on its mat, as large as fits (the mat keeps a wide margin, as a real one does), fading in. */
+  /** The painting over the whole screen (cropped a little to 16:9), with the canvas grain over it, fading in. */
   function place(img, o) {
     var stage = layer.querySelector('.stage');
     var old = stage.querySelector('.piece');
     var piece = el('div', 'piece', stage);
-    var maxW = 1500, maxH = 840, r = img.width / img.height, w = maxW, h = w / r;
-    if (h > maxH) { h = maxH; w = h * r; }
-    piece.style.width = Math.round(w) + 'px';
-    piece.style.height = Math.round(h) + 'px';
-    piece.style.left = Math.round((1920 - w) / 2) + 'px';
-    piece.style.top = Math.round((1080 - h) / 2 - 10) + 'px';
     var canvas = el('div', 'canvas', piece);
     canvas.style.backgroundImage = 'url(' + img.src + ')';
     el('div', 'grain', piece);
-    el('div', 'bevel', piece);
+    el('div', 'edge', piece);
     setTimeout(function () {
       piece.className = 'piece on';
       if (old) { old.className = 'piece'; setTimeout(function () { if (old.parentNode) old.parentNode.removeChild(old); }, 2500); }
