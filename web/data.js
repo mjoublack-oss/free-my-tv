@@ -90,10 +90,11 @@ var Prefs = (function () {
     city: function () { return pick('city', Place.city); },
     latitude: function () { return pick('latitude', Place.lat); },
     longitude: function () { return pick('longitude', Place.lon); },
-    /** The TMDB key typed on the TV (Home Settings → TMDB key), or config.properties' ('' for none). */
-    tmdbKey: function () { return String(pick('tmdbKey', CONFIG.tmdbKey || '')).trim(); },
-    /** True when the key in use was typed on the TV (Remove takes it back to config.properties'). */
-    tmdbKeyOnTV: function () { return v.tmdbKey !== undefined; },
+    /** The MDBList key typed on the TV (Home Settings → MDBList key); this build's picks come from MDBList. The names
+     * stay "tmdbKey" so the rest of the app keeps its calls; the setting itself is a new one, "mdbKey". */
+    tmdbKey: function () { return String(pick('mdbKey', '')).trim(); },
+    /** True when a key was typed on the TV. */
+    tmdbKeyOnTV: function () { return v.mdbKey !== undefined; },
     setCity: function (name, lat, lon) { v.city = name; v.latitude = lat; v.longitude = lon; save(); this.version++; },
     /** Streaming services (keys like "netflix") whose titles are left out of the picks. */
     serviceOff: function (key) { return pick('servicesOff', []).indexOf(key) >= 0; },
@@ -307,115 +308,93 @@ var Data = (function () {
 
   // MARK: - Prices
 
-  var COINS = ['BTC', 'ETH', 'SOL', 'USDT'];
-  var CURRENCY = Place.currency;
-  /** A currency Binance lists no pairs in (COP, MXN...): the coins come in USDT and convert with USDT<currency>. */
-  var FX = 'USDT' + CURRENCY, inFx = false;
-  var QUOTE = CURRENCY === 'USD' ? 'USDT' : CURRENCY;
-  /** Binance refuses the whole request when it has no pairs in the currency (INR...): the prices go in dollars then. */
-  function inDollars() {
-    store('dollarsFor', CURRENCY);
-    CURRENCY = 'USD';
-    QUOTE = 'USDT';
-    inFx = false;   // dollars, not USDT converted: no USDT<currency> in the request any more
-  }
-  /** No direct pairs: USDT first, dollars only when Binance lists no USDT<currency> pair either. */
-  function fromUsdt() {
-    inFx = true;
-    QUOTE = 'USDT';
-  }
-  /** A pair with no trade for a day: Binance halted it and keeps answering with the frozen last price (AUD since 2026-10-06). */
-  function halted(list) {
-    for (var i = 0; list && i < list.length; i++) if (list[i].closeTime > 0 && Date.now() - list[i].closeTime > 864e5) return true;
-    return false;
-  }
-  if (stored('dollarsFor') === CURRENCY && CURRENCY !== 'USD') {
-    CURRENCY = 'USD';
-    QUOTE = 'USDT';
-  } else if (stored('fxFor') === CURRENCY && CURRENCY !== 'USD') {
-    fromUsdt();
-  }
+  // This build's price row: BTC, ETH and XRP from Binance, and Apple's stock (AAPL) from Yahoo Finance, all in dollars.
+  var COINS = ['BTC', 'ETH', 'XRP', 'AAPL'];
+  var NAMES = ['Bitcoin', 'Ethereum', 'XRP', 'Apple (AAPL)'];
+  var CRYPTO = 3;   // COINS[0..2] are Binance pairs; COINS[3] is the stock
+  var CURRENCY = 'USD', QUOTE = 'USDT';
   var prices = [NaN, NaN, NaN, NaN], changes = [NaN, NaN, NaN, NaN], pricesAt = 0, fetchingPrices = false;
+  var stockAt = 0, stockTried = 0, fetchingStock = false;
 
-  /** The dollar card shows the USDT rate when there is one to show (reais, or a currency converted from USDT). */
-  function dollarRow() {
-    return CURRENCY !== 'USD' && (CURRENCY === 'BRL' || inFx);
-  }
-
-  /** Indexes in COINS of the coins that are on (and the dollar where there's a rate for it). */
+  /** Indexes in COINS of the ones switched on in Home Settings. */
   function activeCoins() {
     var out = [];
     if (!Prefs.quotes()) return out;
-    for (var i = 0; i < COINS.length; i++) if (Prefs.coin(i) && (i < 3 || dollarRow())) out.push(i);
+    for (var i = 0; i < COINS.length; i++) if (Prefs.coin(i)) out.push(i);
     return out;
   }
 
   function parsePrices(list) {
-    var found = 0, fx = NaN, fxOpen = NaN, got = [false, false, false, false];
+    var found = 0;
     for (var i = 0; list && i < list.length; i++) {
-      if (inFx && list[i].symbol === FX) {
-        fx = parseFloat(list[i].lastPrice);
-        fxOpen = parseFloat(list[i].openPrice);
-        continue;
-      }
-      for (var k = 0; k < COINS.length; k++) {
+      for (var k = 0; k < CRYPTO; k++) {
         if (list[i].symbol !== COINS[k] + QUOTE) continue;
-        found++;
         var last = parseFloat(list[i].lastPrice), open = parseFloat(list[i].openPrice);
         prices[k] = last;
         changes[k] = open > 0 ? (last - open) / open * 100 : NaN;
-        got[k] = true;
+        found++;
       }
-    }
-    if (inFx) {
-      if (!(fx > 0)) return 0;   // no rate in the answer: as for any answer without prices
-      for (var c = 0; c < 3; c++) if (got[c]) prices[c] *= fx;
-      prices[3] = fx;
-      changes[3] = fxOpen > 0 ? (fx - fxOpen) / fxOpen * 100 : NaN;
-      return found + 1;
     }
     return found;
   }
 
+  /** Yahoo's chart answer: the last price and the change since the previous close. */
+  function parseStock(o) {
+    var r = o && o.chart && o.chart.result && o.chart.result[0], m = r && r.meta;
+    if (!m || !(m.regularMarketPrice > 0)) return false;
+    prices[CRYPTO] = m.regularMarketPrice;
+    var prev = m.chartPreviousClose || m.previousClose;
+    changes[CRYPTO] = prev > 0 ? (m.regularMarketPrice - prev) / prev * 100 : NaN;
+    return true;
+  }
+
   (function () {
     var p = stored('prices');
-    if (p && p.quote === (inFx ? FX : QUOTE) && parsePrices(p.body)) pricesAt = p.at;
+    if (p && p.quote === 'crypto-v2' && parsePrices(p.body)) pricesAt = p.at;
+    var s = stored('stock');
+    if (s && parseStock(s.body)) stockAt = s.at;
   })();
 
   function refreshPrices() {
     var coins = activeCoins(), now = Date.now(), symbols = [];
-    if (!coins.length || fetchingPrices || (now - pricesAt < 5 * 60000 && now >= pricesAt)) return;
+    for (var i = 0; i < coins.length; i++) if (coins[i] < CRYPTO) symbols.push('%22' + COINS[coins[i]] + QUOTE + '%22');
+    if (coins.indexOf(CRYPTO) >= 0) refreshStock(now);
+    if (!symbols.length || fetchingPrices || (now - pricesAt < 5 * 60000 && now >= pricesAt)) return;
     fetchingPrices = true;
-    for (var i = 0; i < coins.length; i++) if (!(inFx && coins[i] === 3)) symbols.push('%22' + COINS[coins[i]] + QUOTE + '%22');
-    if (inFx) symbols.push('%22' + FX + '%22');
     var path = '/api/v3/ticker/24hr?type=MINI&symbols=%5B' + symbols.join(',') + '%5D';
-    // Binance.com refuses the US (HTTP 451); Binance.US answers the same call in dollars. data-api.binance.vision is
-    // Binance's own address for public market data, with Binance.com's pairs on another domain and certificate chain:
-    // it answers where a network blocks or intercepts api.binance.com (#375). A refusal skips it.
+    // data-api.binance.vision answers where a network blocks api.binance.com (#375); Binance.US where .com refuses.
     var hosts = ['https://api.binance.com', 'https://data-api.binance.vision', 'https://api.binance.us'];
-    (function next(h, refused) {
+    (function next(h) {
       get(hosts[h] + path, {}, function (err, body) {
-        // A pair Binance doesn't list (HTTP 400): direct pairs, then USDT converted, then dollars, and no further: a
-        // 400 in dollars stops here. Binance.US has only dollar pairs: its 400 counts only where Binance.com refuses
-        // the US (HTTP 451), not after a timeout or a 5xx there.
-        if (err && err.message === 'HTTP 400' && (inFx || QUOTE !== 'USDT') && (h < 2 || refused)) {
-          fetchingPrices = false;
-          if (inFx) inDollars(); else fromUsdt();
-          refreshPrices();
-          return;
-        }
-        // Halted: dollars for this run, not saved like the 400's (the market may open again).
-        if (!err && !inFx && QUOTE !== 'USDT' && halted(body)) { fetchingPrices = false; CURRENCY = 'USD'; QUOTE = 'USDT'; refreshPrices(); return; }
         if (err || !parsePrices(body)) {
-          var refusal = !!err && err.message === 'HTTP 451';
-          if (h + 1 < hosts.length && !(err && err.message === 'HTTP 400')) next(refusal ? 2 : h + 1, refused || refusal);
+          if (h + 1 < hosts.length) next(h + 1);
           else fetchingPrices = false;
           return;
         }
         fetchingPrices = false;
         pricesAt = Date.now();
-        store('prices', {quote: inFx ? FX : QUOTE, body: body, at: pricesAt});
-        if (inFx) store('fxFor', CURRENCY);
+        store('prices', {quote: 'crypto-v2', body: body, at: pricesAt});
+        changed();
+      });
+    })(0);
+  }
+
+  /** AAPL every 5 minutes (Yahoo's public chart data, no key); a failed try waits 5 minutes too. */
+  function refreshStock(now) {
+    if (fetchingStock || (now - stockAt < 5 * 60000 && now >= stockAt) || (now - stockTried < 5 * 60000 && now >= stockTried)) return;
+    fetchingStock = true;
+    stockTried = now;
+    var hosts = ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'];
+    (function next(h) {
+      get(hosts[h] + '/v8/finance/chart/AAPL?range=1d&interval=1d', {}, function (err, body) {
+        if (err || !parseStock(body)) {
+          if (h + 1 < hosts.length) next(h + 1);
+          else fetchingStock = false;
+          return;
+        }
+        fetchingStock = false;
+        stockAt = Date.now();
+        store('stock', {body: body, at: stockAt});
         changed();
       });
     })(0);
@@ -425,7 +404,6 @@ var Data = (function () {
 
   var KEY = Prefs.tmdbKey();
   var REGION = Place.country;
-  var API = 'https://api.tmdb.org/3';   // TMDB's own mirror of api.themoviedb.org: some ISPs block the other name (#327)
 
   /** Service name on TMDB (part of it, lowercase) → our key, how to find its app on the TV (id, name), its name. */
   var SERVICES = [
@@ -478,26 +456,29 @@ var Data = (function () {
     return null;
   }
 
-  function tmdb(path, done, key) {
+  // This build's picks come from the person's own MDBList lists (mdblist.com), not TMDB's trending: their rules (services,
+  // language, IMDb and Rotten Tomatoes audience scores) decide what shows. The key is theirs, typed on the TV.
+  var MDB = 'https://api.mdblist.com';
+
+  function mdb(path, done, key) {
     key = key || KEY;
-    var bearer = key.indexOf('eyJ') === 0;   // read access token (v4) or API key (v3)
-    var url = API + path + (bearer ? '' : (path.indexOf('?') >= 0 ? '&' : '?') + 'api_key=' + encodeURIComponent(key));
-    get(url, bearer ? {Authorization: 'Bearer ' + key, Accept: 'application/json'} : {Accept: 'application/json'}, done);
+    get(MDB + path + (path.indexOf('?') >= 0 ? '&' : '?') + 'apikey=' + encodeURIComponent(key), {Accept: 'application/json'}, done);
   }
 
-  /** Asks TMDB whether a key works before it's saved: done(error), with error.rejected when TMDB said no. */
+  /** Asks MDBList whether a key works before it's saved: done(error), with error.rejected when MDBList said no. */
   function checkKey(key, done) {
-    tmdb('/configuration', function (err) {
-      if (err && /rejected/.test(err.message)) err.rejected = true;
+    mdb('/user', function (err, o) {
+      if (err && /401|403|rejected/.test(err.message)) err.rejected = true;
+      if (!err && !(o && o.user_id)) { err = new Error('MDBList didn\'t accept the key'); err.rejected = true; }
       done(err || null);
     }, key);
   }
 
-  var cache = stored('recs') || {};
+  var cache = stored('recs-mdb') || {};
   var picks = cache.picks || [], listAt = cache.listAt || 0, period = cache.period, listLang = cache.lang || '', stamp = cache.stamp || '';
   var fetchingRecs = false, failedAt = 0, recsError = '';
 
-  function saveRecs() { store('recs', {picks: picks, listAt: listAt, period: period, lang: listLang, stamp: stamp}); }
+  function saveRecs() { store('recs-mdb', {picks: picks, listAt: listAt, period: period, lang: listLang, stamp: stamp}); }
 
   function hourPeriod(d) {
     var h = d.getHours();
@@ -522,7 +503,8 @@ var Data = (function () {
     if (!KEY) return list;
     for (var i = 0; i < picks.length; i++) {
       var p = picks[i];
-      if ((kind === null || kind === p.kind) && (!p.detailed || (p.app && usable(p.app)))) list.push(p);
+      // A service switched off in Home Settings (Picks from) leaves its titles out; one with no app here still shows.
+      if ((kind === null || kind === p.kind) && !(p.app && Prefs.serviceOff(p.app))) list.push(p);
     }
     if (!list.length) return list;
     var hour = Math.floor(Date.now() / 3600000), out = [], seen = {}, n = Prefs.cards();
@@ -533,106 +515,68 @@ var Data = (function () {
     return out;
   }
 
-  /** TMDB's language, as on Android: Latin American Spanish unless the TV is in Spain, and Germany's German. */
-  function lang() {
-    if (I18N.lang === 'es') return /-ES\b/i.test(navigator.language || '') ? 'es-ES' : 'es-MX';
-    if (I18N.lang === 'de') return 'de-DE';   // TMDB's de-AT and de-CH have few translations of their own
-    return I18N.locale();
-  }
+  function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
 
-  function day(offset) {
-    var d = new Date(Date.now() + offset * 86400000);
-    function two(n) { return (n < 10 ? '0' : '') + n; }
-    return d.getFullYear() + '-' + two(d.getMonth() + 1) + '-' + two(d.getDate());
-  }
-
-  /** TMDB's genres that it leaves in English in some languages. */
-  function genre(name) {
-    switch (name) {
-      case 'Action & Adventure': return tr('genre|Action & Adventure');
-      case 'Sci-Fi & Fantasy': return tr('genre|Sci-Fi & Fantasy');
-      case 'War & Politics': return tr('genre|War & Politics');
-      case 'Kids': return tr('genre|Kids');
-      case 'News': return tr('genre|News');
-      case 'Soap': return tr('genre|Soap');
-      case 'Talk': return tr('genre|Talk');
-      default: return name;
+  /** A rating from MDBList's list: 'imdb' (7.3) or 'popcorn' (Rotten Tomatoes' audience, 93), or NaN. */
+  function rating(o, source) {
+    for (var i = 0; o.ratings && i < o.ratings.length; i++) {
+      var r = o.ratings[i];
+      if (r.source === source && r.value !== null && r.value !== undefined) return +r.value;
     }
+    return NaN;
   }
 
-  /** The best backdrop: no text over it, the largest, then the best rated. */
-  function bestBackdrop(images) {
-    var list = images && images.backdrops, best = null, score = -1;
-    for (var i = 0; list && i < list.length; i++) {
-      var b = list[i];
-      if (!b.file_path) continue;
-      var s = (b.iso_639_1 === null ? 1e7 : 0) + Math.min(b.width || 0, 3840) * 100 + (b.vote_average || 0);
-      if (s > score) { score = s; best = b.file_path; }
+  /** The line under the wide card: IMDb, the audience score, the genre, the length, the service. */
+  function metaOf(p) {
+    var parts = [];
+    if (!isNaN(p.imdb)) parts.push('IMDb ' + p.imdb.toFixed(1));
+    if (!isNaN(p.popcorn)) parts.push('Audience ' + Math.round(p.popcorn) + '%');
+    if (p.genre) parts.push(p.genre);
+    if (p.kind === 'movie' && p.runtime > 0) {
+      var h = Math.floor(p.runtime / 60), m = p.runtime % 60;
+      parts.push(h ? trf('{h}h {m}m', {h: h, m: m}) : trf('{m}m', {m: m}));
+    } else if (p.kind === 'tv') {
+      parts.push(tr('Series'));
     }
-    return best;
+    if (p.service) parts.push(p.service);
+    return parts.join(' · ');
   }
 
-  /** Genre, runtime or seasons, and the service it's on among the TV's apps. */
+  /** The wide photo and the services it streams on (MDBList's media info, one request per title, kept with the list). */
   function details(p, done) {
-    tmdb('/' + p.kind + '/' + p.id + '?language=' + lang() + '&append_to_response=watch/providers,images&include_image_language=null,'
-        + I18N.base + ',en', function (err, o) {
+    mdb('/tmdb/' + (p.kind === 'tv' ? 'show' : 'movie') + '/' + p.id + '/', function (err, o) {
       if (err) { done(err); return; }
-      var best = bestBackdrop(o.images);
-      if (best) p.backdrop = best;
-      if (o.poster_path) p.poster = o.poster_path;
-      var parts = [];
-      if (p.kind === 'tv') parts.push(tr('Series'));
-      if (o.genres && o.genres.length) {
-        parts.push(genre(o.genres[0].name));
-      }
-      if (p.kind === 'movie' && o.runtime > 0) {
-        var h = Math.floor(o.runtime / 60), m = o.runtime % 60;
-        parts.push(h ? trf('{h}h {m}m', {h: h, m: m}) : trf('{m}m', {m: m}));
-      } else if (p.kind === 'tv' && o.number_of_seasons > 0) {
-        parts.push(plural('plural|one:{n} season|other:{n} seasons', o.number_of_seasons));
-      }
-      var wp = o['watch/providers'], here = wp && wp.results && wp.results[REGION], flat = here && here.flatrate;
+      if (o.backdrop) p.backdrop = o.backdrop;
+      if (o.poster) p.poster = o.poster;
       p.app = null;
-      for (var i = 0; flat && i < flat.length && !p.app; i++) {
-        var s = service(flat[i].provider_name, flat[i].provider_id);
-        if (s && usable(s[1])) { p.app = s[1]; p.service = s[4]; }
+      p.service = '';
+      // watch_providers: the subscription services (TMDB's ids, 337 Disney Plus); streams is sometimes empty.
+      var streams = (o.watch_providers || []).concat(o.streams || []);
+      // The person's own services first (what their MDBList lists filter on), then any other one we know.
+      var MINE = ['netflix', 'prime', 'appletv', 'max', 'disney', 'paramount'], best = null, rank = 99;
+      for (var i = 0; i < streams.length; i++) {
+        var s = service(streams[i].name, streams[i].id === 350 || /apple tv/i.test(streams[i].name) ? 350 : streams[i].id);
+        var r = s ? (MINE.indexOf(s[1]) >= 0 ? MINE.indexOf(s[1]) : 50) : 99;
+        if (r < rank) { rank = r; best = s; }
       }
-      if (p.service && p.app) parts.push(p.service);
-      p.meta = parts.join(' · ');
-      title(p, o, function () {
-        p.detailed = true;
-        done(null);
-      });
+      if (best) { p.service = best[4]; p.app = best[1]; }
+      if (!p.service && streams.length) p.service = streams[0].name;
+      p.meta = metaOf(p);
+      p.detailed = true;
+      done(null);
     });
   }
 
-  /**
-   * Without a title in the TV's language TMDB answers with the original one, so a Korean series on a German TV reads
-   * "닥터X: 하얀 마피아의 시대". Then the English title, when TMDB has one (one more request, only for those).
-   */
-  function title(p, o, done) {
-    var field = p.kind === 'movie' ? 'title' : 'name', own = o[field] || p.title;
-    p.title = own;
-    if (I18N.lang === 'en' || !own || own !== o['original_' + field] || o.original_language === I18N.base
-        || o.original_language === 'en') { done(); return; }
-    tmdb('/' + p.kind + '/' + p.id + '?language=en-US', function (err, en) {
-      if (!err && en && en[field]) p.title = en[field];
-      done();
-    });
-  }
-
-  /** TMDB's Animation genre (movies and shows: cartoons and anime), left out with Cartoons and anime off. */
-  var ANIMATION = 16;
-
-  function animated(o) {
-    for (var i = 0; o.genre_ids && i < o.genre_ids.length; i++) if (o.genre_ids[i] === ANIMATION) return true;
-    return false;
-  }
-
+  /** A title from a list, when it has a picture; cartoons and anime only with Cartoons and anime on. */
   function addPick(list, o, kind) {
-    if (!o.backdrop_path) return;
-    if (Prefs.hideAnimation() && animated(o)) return;
-    list.push({id: o.id, kind: kind, title: kind === 'movie' ? o.title : o.name, backdrop: o.backdrop_path, poster: o.poster_path || '', meta: '', app: null, detailed: false});
+    var tmdbId = (o.ids && o.ids.tmdb) || o.id;
+    if (!tmdbId || !o.poster) return;
+    var genres = o.genres || [];
+    if (Prefs.hideAnimation() && genres.indexOf('animation') >= 0) return;
+    var p = {id: tmdbId, kind: kind, title: o.title, poster: o.poster, backdrop: '', imdb: rating(o, 'imdb'),
+      popcorn: rating(o, 'popcorn'), genre: cap(genres[0] || ''), runtime: o.runtime || 0, service: '', app: null, detailed: false};
+    p.meta = metaOf(p);
+    list.push(p);
   }
 
   function keyOf(p) { return p.kind + ':' + p.id; }
@@ -653,41 +597,40 @@ var Data = (function () {
     })();
   }
 
+  /**
+   * Every list on the person's MDBList account (their dynamic lists: Movies, Shows), movies and shows alternating. The
+   * details already fetched for a title are kept, so a new list costs requests only for what's new on it.
+   */
   function fetchList(done) {
-    tmdb('/watch/providers/movie?language=' + lang() + '&watch_region=' + REGION, function (err, res) {
+    mdb('/lists/user', function (err, lists) {
       if (err) { done(err); return; }
-      var ids = [];
-      for (var i = 0; res.results && i < res.results.length; i++) {
-        var s = service(res.results[i].provider_name, res.results[i].provider_id);
-        if (s && usable(s[1])) ids.push(res.results[i].provider_id);
-      }
-      if (!ids.length) { done(new Error("none of the TV's streaming apps are on TMDB (or switched on in Picks from)")); return; }
-      var common = '&language=' + lang() + '&watch_region=' + REGION + '&with_watch_monetization_types=flatrate&include_adult=false'
-          + '&sort_by=popularity.desc&with_watch_providers=' + encodeURIComponent(ids.join('|'))
-          + (Prefs.hideAnimation() ? '&without_genres=' + ANIMATION : '');
-      var hot = {movie: [], tv: []}, fresh = {movie: [], tv: []};
-      each(['movie', 'tv'], function (kind, next) {
-        tmdb('/trending/' + kind + '/week?language=' + lang(), function (e, r) {
-          var candidates = [];
-          for (var j = 0; !e && j < r.results.length && j < 16; j++) addPick(candidates, r.results[j], kind);
-          // Trending is only kept when it's on one of the TV's apps: the details say where.
-          each(candidates, function (p, n) {
-            details(p, function (de) { if (!de && p.app) hot[kind].push(p); n(); });
-          }, next);
+      if (!lists || !lists.length) { done(new Error('no lists on this MDBList account yet (or they are still filling)')); return; }
+      var found = {movie: [], tv: []}, old = {};
+      for (var i = 0; i < picks.length; i++) old[keyOf(picks[i])] = picks[i];
+      each(lists.slice(0, 4), function (l, next) {
+        mdb('/lists/' + l.id + '/items?limit=60&append_to_response=poster,ratings_all,genres', function (e, r) {
+          if (e || !r) { next(); return; }
+          var movies = r.movies || [], shows = r.shows || [];
+          for (var j = 0; j < movies.length; j++) addPick(found.movie, movies[j], 'movie');
+          for (var k = 0; k < shows.length; k++) addPick(found.tv, shows[k], 'tv');
+          next();
         });
       }, function () {
-        tmdb('/discover/movie?vote_count.gte=30&primary_release_date.gte=' + day(-365) + '&primary_release_date.lte=' + day(0) + common, function (e1, r1) {
-          for (var j = 0; !e1 && j < r1.results.length; j++) addPick(fresh.movie, r1.results[j], 'movie');
-          tmdb('/discover/tv?vote_count.gte=20&air_date.gte=' + day(-90) + '&air_date.lte=' + day(0) + common, function (e2, r2) {
-            for (var k = 0; !e2 && k < r2.results.length; k++) addPick(fresh.tv, r2.results[k], 'tv');
-            var list = [], seen = {};
-            alternate(list, seen, hot.movie, hot.tv, 24);
-            alternate(list, seen, fresh.movie, fresh.tv, 24);
-            if (!list.length) { done(new Error('TMDB returned no recommendations')); return; }
-            picks = list;
-            done(null);
-          });
-        });
+        var list = [], seen = {};
+        alternate(list, seen, found.movie, found.tv, 80);
+        if (!list.length) { done(new Error('the MDBList lists are empty')); return; }
+        for (var n = 0; n < list.length; n++) {
+          var was = old[keyOf(list[n])];
+          if (was && was.detailed) {
+            list[n].backdrop = was.backdrop;
+            list[n].service = was.service;
+            list[n].app = was.app;
+            list[n].detailed = true;
+            list[n].meta = metaOf(list[n]);
+          }
+        }
+        picks = list;
+        done(null);
       });
     });
   }
@@ -776,7 +719,12 @@ var Data = (function () {
     recsError: function () { return recsError; },
     picks: now,
     showcase: all,
-    image: function (path, size) { return path ? 'https://image.tmdb.org/t/p/' + (size || 'w1280') + path : ''; },
+    /** MDBList gives whole TMDB image addresses: the size in them is swapped for the one wanted here. */
+    image: function (path, size) {
+      if (!path) return '';
+      if (/^https?:/.test(path)) return path.replace(/\/t\/p\/[^\/]+\//, '/t/p/' + (size || 'w1280') + '/');
+      return 'https://image.tmdb.org/t/p/' + (size || 'w1280') + path;
+    },
 
     /** Night at the location: from sunset to sunrise (the last forecast; without one, 6:00 and 18:00). */
     isNight: function (at) {
@@ -848,6 +796,7 @@ var Data = (function () {
       if (code >= 95) return 'thunderstorm';
       return 'rainy';
     },
-    coinName: function (i) { return i === 3 ? tr('Dollar') : ['Bitcoin', 'Ethereum', 'Solana'][i]; }
+    coinName: function (i) { return NAMES[i]; },
+    get stockAt() { return stockAt; }
   };
 })();

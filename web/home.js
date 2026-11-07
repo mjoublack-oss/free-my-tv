@@ -477,6 +477,24 @@
     }
   }
 
+  /** The next prayer and the next matches (extras.js), at the top right beside the round buttons. */
+  var infoKey = '';
+  function renderInfo() {
+    var lines = window.Extras ? Extras.lines() : [], key = JSON.stringify(lines);
+    if (key === infoKey) return;
+    infoKey = key;
+    var box = $('info');
+    box.innerHTML = '';
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i], row = el('div', 'line ' + l.kind + (l.live ? ' live' : ''), box);
+      if (l.kind === 'prayer') sym('bedtime', row, 24);
+      else el('span', l.live ? 'dot' : 'ball', row);
+      if (l.live) el('span', 'badge', row, 'LIVE');
+      el('span', 'main', row, l.main);
+      if (l.side) el('span', 'side', row, l.side);
+    }
+  }
+
   // MARK: - Picks and background
 
   function renderCards() {
@@ -774,7 +792,7 @@
   }, 60000);
 
   function renderPrices(card, coins) {
-    el('div', 'head', card, tr('Crypto'));
+    el('div', 'head', card, 'Markets');
     var stale = Data.staleness(Data.pricesAt, 5 * 60000);
     el('div', 'side', card, stale ? trf('quotes|{ago}', {ago: stale}) : tr('24h change'));
     for (var j = 0; j < coins.length; j++) {
@@ -875,15 +893,14 @@
       {label: tr('Quotes widget'), toggle: Prefs.quotes(),
         step: function () { Prefs.set('quotes', !Prefs.quotes()); Data.settingsChanged(); }}
     ];
-    var names = ['Bitcoin', 'Ethereum', 'Solana', tr('Dollar')];
-    var count = Data.currency === 'BRL' ? 4 : 3;
-    for (var i = 0; i < count; i++) {
+    var names = [Data.coinName(0), Data.coinName(1), Data.coinName(2), Data.coinName(3)];
+    for (var i = 0; i < names.length; i++) {
       (function (i) {
         rows.push({label: names[i], toggle: Prefs.quotes() && Prefs.coin(i), dim: !Prefs.quotes(),
           step: function () { if (Prefs.quotes()) { Prefs.setCoin(i, !Prefs.coin(i)); Data.settingsChanged(); } }});
       })(i);
     }
-    rows.push({label: tr('TMDB key'), value: Prefs.tmdbKey().length >= 4 ? '•••• ' + Prefs.tmdbKey().slice(-4) : tr('Not set'), opens: true, tmdb: true,
+    rows.push({label: 'MDBList key', value: Prefs.tmdbKey().length >= 4 ? '•••• ' + Prefs.tmdbKey().slice(-4) : tr('Not set'), opens: true, tmdb: true,
       step: function (d) { if (d >= 0) openKey(); }});
     var sv = Data.services();
     if (sv.length) {
@@ -1131,15 +1148,15 @@
   function keyRows() { return keyAsking ? 2 : Prefs.tmdbKeyOnTV() ? 3 : 2; }
 
   function keySteps() {
-    return tr("The key brings the picks: what's trending on your streaming apps, with their photos on the screensaver.") + '\n'
-      + tr('Free, and it takes two minutes:') + '\n1. ' + tr('Create an account at themoviedb.org.')
-      + '\n2. ' + tr('Open Settings → API and request a developer key.');
+    return 'The key brings the picks from your own MDBList lists, with their IMDb and audience scores.\n'
+      + 'Free:\n1. Sign in at mdblist.com and make your lists (Movies, Shows).\n'
+      + '2. Open Preferences → API key and type it here.';
   }
 
   function renderKey() {
     var box = $('keypick').firstChild, old = fieldOf('keypick'), typed = old ? old.value : '', inField = typingIn('keypick');
     box.innerHTML = '';
-    el('div', 'title', box, keyAsking ? tr('Remove the TMDB key?') : tr('TMDB key'));
+    el('div', 'title', box, keyAsking ? 'Remove the MDBList key?' : 'MDBList key');
     var list = el('div', 'list', box), holder = el('div', 'rows', list);
     list.style.height = keyRows() * 78 + 'px';
     if (keyAsking) {
@@ -1148,7 +1165,7 @@
       updateFocus();
       return;
     }
-    var keyField = textField(holder, Z.KEY, typed, tr('API Read Access Token or API Key'), tr('TMDB key'));
+    var keyField = textField(holder, Z.KEY, typed, 'API key', 'MDBList key');
     // A v3 key is lowercase hex: the TV's keyboard mustn't capitalize it (the city's field wants capitals).
     keyField.setAttribute('autocapitalize', 'none');
     keyField.setAttribute('autocorrect', 'off');
@@ -1178,7 +1195,7 @@
     keyStatus = text;
     keyWarn = !!warn;
     clearTimeout(keyTimer);
-    if (text && text !== tr('Checking the key with TMDB…')) keyTimer = setTimeout(function () {
+    if (text && text !== 'Checking the key with MDBList…') keyTimer = setTimeout(function () {
       keyStatus = '';
       var line = st.zone === Z.KEY && $('keypick').querySelector('.hint:not(.steps)');
       if (line) line.parentNode.removeChild(line);
@@ -1195,14 +1212,14 @@
     var f = fieldOf('keypick'), typed = f ? f.value : '', key = cleanKey(typed);
     closeField('keypick');
     if (!typed.replace(/\s+/g, '')) { st.key = 0; openField('keypick'); updateFocus(); return; }
-    if (keyStatus === tr('Checking the key with TMDB…')) return;
-    if (!key) { setKeyStatus(tr("That doesn't look like a TMDB key."), true); return; }
-    setKeyStatus(tr('Checking the key with TMDB…'));
+    if (keyStatus === 'Checking the key with MDBList…') return;
+    if (!key) { setKeyStatus("That doesn't look like an MDBList key.", true); return; }
+    setKeyStatus('Checking the key with MDBList…');
     var mine = ++keySeq;   // an answer for a sheet already closed is dropped
     Data.checkKey(key, function (err) {
       if (mine !== keySeq || st.zone !== Z.KEY) return;
-      if (err) { setKeyStatus(err.rejected ? tr('TMDB refused this key.') : trf("Couldn't reach TMDB: {error}", {error: err.message}), true); return; }
-      Prefs.set('tmdbKey', key);
+      if (err) { setKeyStatus(err.rejected ? 'MDBList refused this key.' : "Couldn't reach MDBList: " + err.message, true); return; }
+      Prefs.set('mdbKey', key);
       if (fieldOf('keypick')) fieldOf('keypick').value = '';
       Data.keyChanged();
       setKeyStatus(tr('Saved. The picks arrive in a moment.'));
@@ -1211,7 +1228,7 @@
 
   /** Back to config.properties' key (none in the releases): the picks go. */
   function removeKey() {
-    Prefs.set('tmdbKey', undefined);   // left out of the saved settings
+    Prefs.set('mdbKey', undefined);   // left out of the saved settings
     closeKey();
     Data.keyChanged();
   }
@@ -1784,6 +1801,8 @@
     restInDrawer();   // drawer_first: out again at once, not only after the TV lists its apps
   }
 
+  if (window.Extras) Extras.onChange(renderInfo);
+
   Data.onChange(function () {
     renderQuotes();
     renderCards();
@@ -1823,14 +1842,19 @@
   renderTop();
   applyDim();
   tickClock();
+  renderInfo();
+  if (window.Extras) Extras.refresh();
   loadApps(function () {
     renderAll();
     restInDrawer();
     Data.refresh();
   });
+  // The countdowns move every minute; the 30-second tick below can be up to 30 s late, so this one runs on its own.
+  setInterval(renderInfo, 15000);
   setInterval(function () {
     checkNight();
     Data.refresh();
+    if (window.Extras) Extras.refresh();
     applyDim();   // automatic: medium from 22:00, off again at 07:00
     if (!saverOn && !ambientOn && !sheetOpen() && Date.now() - idleAt > SAVER_AFTER) {
       if (saverMode() === 'clock') showAmbient(); else showSaver();

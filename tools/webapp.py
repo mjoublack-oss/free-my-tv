@@ -71,11 +71,15 @@ def read_config(path):
 
 
 def coins():
-    """The coins' logos from the Android app's vector drawables, as SVG paths (BTC, ETH, SOL, USDT)."""
+    """The price row's logos, as SVG paths on a 32 × 32 box: BTC and ETH from the Android app's vector drawables,
+    then XRP and a rising chart for the AAPL stock (drawn here)."""
     out = []
-    for name in ('btc', 'eth', 'sol', 'usdt'):
+    for name in ('btc', 'eth'):
         with open(os.path.join(ROOT, 'app', 'res', 'drawable', 'coin_%s.xml' % name), encoding='utf-8') as f:
             out.append(re.findall(r'android:pathData="([^"]+)"', f.read()))
+    out.append(['M8 7h3.2l3.4 3.3a2 2 0 0 0 2.8 0L20.8 7H24l-5.3 5.1a3.9 3.9 0 0 1-5.4 0z',
+                'M8 25h3.2l3.4-3.3a2 2 0 0 1 2.8 0l3.4 3.3H24l-5.3-5.1a3.9 3.9 0 0 0-5.4 0z'])
+    out.append(['M5 21.6l6.5-6.5 4 4L23 11.6V15h2V8h-7v2h3.6l-6.1 6.1-4-4L5 18.6z'])
     return out
 
 
