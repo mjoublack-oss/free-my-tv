@@ -316,8 +316,8 @@ var TV = (function () {
     post('/api/v2/applications/' + hubId, 30000, done);
   }
 
-  /** A POST to the TV's own server on port 8001 (DIAL and its REST API); done(ok). */
-  function post(path, timeout, done) {
+  /** A POST to the TV's own server on port 8001 (DIAL and its REST API); done(ok). `body` is DIAL's launch data. */
+  function post(path, timeout, done, body) {
     var x = new XMLHttpRequest(), over = false;
     x.open('POST', 'http://127.0.0.1:8001' + path, true);
     x.timeout = timeout;
@@ -328,7 +328,7 @@ var TV = (function () {
     };
     x.ontimeout = x.onerror = function () { if (!over) { over = true; if (done) done(false); } };
     x.setRequestHeader('Content-Type', 'text/plain; charset=utf-8');
-    x.send('');
+    x.send(body || '');
   }
 
   function samsungLaunch(id, done) {
@@ -607,6 +607,15 @@ var TV = (function () {
 
     /** LG: keeps the TV's screensaver away while ours will take over (`hold` says when). */
     holdScreenSaver: holdScreenSaver,
+
+    /**
+     * One YouTube video, as a phone casts it: the TV's DIAL server opens the YouTube app with v=<id>. done(ok); where it
+     * doesn't answer, the caller opens the YouTube app instead.
+     */
+    playYouTube: function (videoId, done) {
+      if (!samsung) { if (done) done(false); return; }
+      post('/ws/apps/YouTube', 8000, done, 'v=' + encodeURIComponent(videoId));
+    },
 
     /** Back on the first screen: back to wherever the person came from. */
     back: function () {

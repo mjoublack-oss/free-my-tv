@@ -477,6 +477,20 @@ var Data = (function () {
   var cache = stored('recs-mdb') || {};
   var picks = cache.picks || [], listAt = cache.listAt || 0, period = cache.period, listLang = cache.lang || '', stamp = cache.stamp || '';
   var fetchingRecs = false, failedAt = 0, recsError = '';
+  var SLOT = 30 * 60000;          // the picks change every 30 minutes
+  var RELOAD = 3 * 3600000;       // the lists are read again every 3 hours, a new random part of the big ones each time
+  var shift = 0;                  // the refresh button moves on to the next set at once
+
+  /** MDBList's free plan allows 1,000 requests a day: the per-title details stop at 700, the rest show their poster. */
+  var BUDGET = 700;
+  function spend() {
+    var day = new Date().toDateString(), b = stored('mdb-budget') || {};
+    if (b.day !== day) b = {day: day, used: 0};
+    if (b.used >= BUDGET) return false;
+    b.used++;
+    store('mdb-budget', b);
+    return true;
+  }
 
   function saveRecs() { store('recs-mdb', {picks: picks, listAt: listAt, period: period, lang: listLang, stamp: stamp}); }
 
@@ -507,9 +521,10 @@ var Data = (function () {
       if ((kind === null || kind === p.kind) && !(p.app && Prefs.serviceOff(p.app))) list.push(p);
     }
     if (!list.length) return list;
-    var hour = Math.floor(Date.now() / 3600000), out = [], seen = {}, n = Prefs.cards();
+    // A new set every 30 minutes (SLOT), walking through the whole pool before any title comes back.
+    var slot = Math.floor(Date.now() / SLOT) + shift, out = [], seen = {}, n = Prefs.cards();
     for (var j = 0; j < list.length && out.length < n; j++) {
-      var q = list[(hour * n + j) % list.length], f = franchise(q.title);
+      var q = list[(slot * n + j) % list.length], f = franchise(q.title);
       if (!seen[f]) { seen[f] = true; out.push(q); }
     }
     return out;
@@ -544,6 +559,12 @@ var Data = (function () {
 
   /** The wide photo and the services it streams on (MDBList's media info, one request per title, kept with the list). */
   function details(p, done) {
+    if (!spend()) {   // over today's budget: the poster stands in for the wide photo
+      p.backdrop = p.poster;
+      p.detailed = true;
+      done(null);
+      return;
+    }
     mdb('/tmdb/' + (p.kind === 'tv' ? 'show' : 'movie') + '/' + p.id + '/', function (err, o) {
       if (err) { done(err); return; }
       if (o.backdrop) p.backdrop = o.backdrop;
@@ -581,6 +602,15 @@ var Data = (function () {
 
   function keyOf(p) { return p.kind + ':' + p.id; }
 
+  function shuffle(a) {
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1)), t = a[i];
+      a[i] = a[j];
+      a[j] = t;
+    }
+    return a;
+  }
+
   function alternate(out, seen, a, b, max) {
     for (var i = 0; i < Math.max(a.length, b.length) && out.length < max; i++) {
       if (i < a.length && !seen[keyOf(a[i])]) { seen[keyOf(a[i])] = true; out.push(a[i]); }
@@ -608,7 +638,9 @@ var Data = (function () {
       var found = {movie: [], tv: []}, old = {};
       for (var i = 0; i < picks.length; i++) old[keyOf(picks[i])] = picks[i];
       each(lists.slice(0, 4), function (l, next) {
-        mdb('/lists/' + l.id + '/items?limit=60&append_to_response=poster,ratings_all,genres', function (e, r) {
+        // Up to 100 titles a list; from a bigger one, a different random hundred at each reload.
+        var offset = l.items > 100 ? Math.floor(Math.random() * (l.items - 100)) : 0;
+        mdb('/lists/' + l.id + '/items?limit=100&offset=' + offset + '&append_to_response=poster,ratings_all,genres', function (e, r) {
           if (e || !r) { next(); return; }
           var movies = r.movies || [], shows = r.shows || [];
           for (var j = 0; j < movies.length; j++) addPick(found.movie, movies[j], 'movie');
@@ -617,7 +649,9 @@ var Data = (function () {
         });
       }, function () {
         var list = [], seen = {};
-        alternate(list, seen, found.movie, found.tv, 80);
+        shuffle(found.movie);
+        shuffle(found.tv);
+        alternate(list, seen, found.movie, found.tv, 200);
         if (!list.length) { done(new Error('the MDBList lists are empty')); return; }
         for (var n = 0; n < list.length; n++) {
           var was = old[keyOf(list[n])];
@@ -640,7 +674,7 @@ var Data = (function () {
     if (!KEY || fetchingRecs || !installed.length) return;
     var t = Date.now(), p = hourPeriod(new Date()), st = sourceStamp();
     if (st === stamp && failedAt && t - failedAt < 10 * 60000 && t >= failedAt) return;
-    var stale = st !== stamp || p !== period || t - listAt > 6 * 3600000 || t < listAt || !picks.length || listLang !== I18N.lang;
+    var stale = st !== stamp || p !== period || t - listAt > RELOAD || t < listAt || !picks.length || listLang !== I18N.lang;
     var wanted = all(), missing = false;
     for (var i = 0; i < wanted.length; i++) missing = missing || !wanted[i].detailed;
     if (!stale && !missing) return;
@@ -719,6 +753,16 @@ var Data = (function () {
     recsError: function () { return recsError; },
     picks: now,
     showcase: all,
+    /** Every title already shown with its photo: the screensaver goes through all of them, not only this half hour's. */
+    pool: function () { return picks.filter(function (p) { return p.detailed && p.backdrop; }); },
+    /** The refresh button: a new random part of the lists now, and the next set on screen at once. */
+    reloadPicks: function () {
+      shift++;
+      listAt = 0;
+      failedAt = 0;
+      refreshRecs();
+      changed();
+    },
     /** MDBList gives whole TMDB image addresses: the size in them is swapped for the one wanted here. */
     image: function (path, size) {
       if (!path) return '';

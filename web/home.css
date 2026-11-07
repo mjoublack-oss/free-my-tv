@@ -151,6 +151,105 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 #quotes .q { display: inline-block; margin-left: 24px; }
 #quotes svg { width: 15px; height: 15px; vertical-align: -1px; margin-right: 6px; fill: rgba(142, 142, 147, 0.7); }
 #quotes.hide { opacity: 0; }
+/* This build: the prices stay in the drawer's Markets card only, not under the buttons. */
+#quotes { display: none; }
+
+/* The refresh button at the end of the tabs: a round icon-only tab. */
+.tab.refresh { width: 68px; padding: 0; vertical-align: top; }
+.tab.refresh .sym { position: absolute; left: 19px; top: 19px; background-color: #6E6E73; }
+.tab.refresh.focus .sym { background-color: #1D1D1F; }
+.night .tab.refresh .sym { background-color: rgba(245, 245, 247, 0.62); }
+.night .tab.refresh.focus .sym { background-color: #1D1D1F; }
+
+/* The YouTube tab before there are videos: the sign-in code, where the picks would be. */
+#ytprompt { position: absolute; left: 80px; top: 290px; width: 1300px; display: none; color: #1D1D1F; }
+.yt-empty #ytprompt { display: block; }
+body.yt-empty #clock { display: none; }
+#ytprompt .head { font-size: 52px; font-weight: 700; margin-bottom: 26px; }
+#ytprompt .step { font-size: 32px; line-height: 1.4; color: #3A3A3C; }
+#ytprompt .step.small { font-size: 24px; color: #6E6E73; margin-top: 26px; max-width: 1100px; }
+#ytprompt .code {
+  display: inline-block;
+  margin-top: 22px;
+  padding: 14px 34px;
+  border-radius: 18px;
+  font-size: 72px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  background: #FFF;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.14);
+}
+.night #ytprompt { color: #F5F5F7; }
+.night #ytprompt .step { color: rgba(245, 245, 247, 0.8); }
+.night #ytprompt .step.small { color: rgba(245, 245, 247, 0.6); }
+.night #ytprompt .code { background: #2C2C2E; color: #FFF; }
+
+/* Art: a Frame-style painting on a warm off-white mat, a thin bevel around it, a faint canvas grain. */
+#art {
+  z-index: 60;
+  opacity: 0;
+  visibility: hidden;
+  background: #ECE6DC;
+  background: -webkit-radial-gradient(center, ellipse, #F1ECE3 0%, #E6DFD3 100%);
+  background: radial-gradient(ellipse at center, #F1ECE3 0%, #E6DFD3 100%);
+  -webkit-transition: opacity 0.8s, visibility 0s 0.8s;
+  transition: opacity 0.8s, visibility 0s 0.8s;
+}
+#art.on { opacity: 1; visibility: visible; -webkit-transition: opacity 0.8s; transition: opacity 0.8s; }
+#art .stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; }
+#art .piece { position: absolute; opacity: 0; -webkit-transition: opacity 2s; transition: opacity 2s; }
+#art .piece.on { opacity: 1; }
+#art .canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; background-size: cover; background-position: center; }
+/* Canvas weave: two fine crossing stripes, barely there. */
+#art .grain {
+  position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+  opacity: 0.07;
+  background-image: -webkit-repeating-linear-gradient(0deg, #000 0, #000 1px, transparent 1px, transparent 3px),
+    -webkit-repeating-linear-gradient(90deg, #000 0, #000 1px, transparent 1px, transparent 3px);
+  background-image: repeating-linear-gradient(0deg, #000 0, #000 1px, transparent 1px, transparent 3px),
+    repeating-linear-gradient(90deg, #000 0, #000 1px, transparent 1px, transparent 3px);
+}
+/* The mat's cut edge: light on the top and left, shadow falling onto the painting, and a soft shadow outside. */
+#art .bevel {
+  position: absolute; left: -6px; top: -6px; right: -6px; bottom: -6px;
+  box-shadow: inset 0 0 0 6px #F6F2EA, inset 3px 4px 10px rgba(0, 0, 0, 0.28), 0 1px 2px rgba(0, 0, 0, 0.12), 0 6px 22px rgba(0, 0, 0, 0.10);
+}
+#art .caption {
+  position: absolute; left: 0; right: 0; bottom: 34px;
+  text-align: center;
+  font-size: 22px;
+  letter-spacing: 0.04em;
+  color: rgba(60, 52, 42, 0.75);
+  opacity: 0;
+  -webkit-transition: opacity 1.5s;
+  transition: opacity 1.5s;
+}
+#art .caption.on { opacity: 1; }
+
+/* The screensaver: the pick's scores and service under its title, and the next prayer at the top right. */
+#saver .clock .meta {
+  margin-top: 10px;
+  font-size: 28px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.82);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45);
+}
+#saver .prayer {
+  position: absolute;
+  right: 80px;
+  top: 64px;
+  z-index: 3;
+  white-space: nowrap;
+  font-size: 30px;
+  line-height: 40px;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
+  -webkit-font-feature-settings: 'tnum';
+  font-feature-settings: 'tnum';
+}
+#saver .prayer .main { font-weight: 600; color: #FFF; }
+#saver .prayer .side { margin-left: 16px; color: #9FF0D2; font-weight: 600; }
+#saver .prayer .sym { display: inline-block; vertical-align: -4px; margin-right: 12px; background-color: #9FF0D2; }
 .night #quotes { color: rgba(245, 245, 247, 0.62); }
 
 /* The next prayer and the next matches (extras.js): right-aligned lines left of the round buttons. */

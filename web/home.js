@@ -393,8 +393,8 @@
       setClass(list[i], 'focus', st.zone === Z.TOP && st.top === i);
     }
     list = $('buttons').children;
-    for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.TOP && st.top === 3 + i);
-    setClass($('quotes'), 'hide', st.zone === Z.TOP && st.top >= 3);
+    for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.TOP && st.top === BTN + i);
+    setClass($('quotes'), 'hide', st.zone === Z.TOP && st.top >= BTN);
     layoutCards();
     list = $('cards').children;
     for (i = 0; i < list.length; i++) setClass(list[i], 'focus', st.zone === Z.CARDS && st.card === i);
@@ -443,27 +443,57 @@
 
   // MARK: - Top: title, tabs, buttons, quotes
 
-  var TAB_KIND = [null, 'movie', 'tv'];
+  // The top row: four tabs (Explore, Movies, Shows, YouTube), the refresh button, then the three round buttons.
+  var TAB_KIND = [null, 'movie', 'tv', 'youtube'];
+  var TABS = 4, YT = 3, REFRESH = 4, BTN = 5;
 
   function renderTop() {
     $('title').textContent = tr('For You');
     var tabs = $('tabs');
     tabs.innerHTML = '';
-    var names = [tr('Explore'), tr('Movies'), tr('Shows')];
-    for (var i = 0; i < 3; i++) {
+    var names = [tr('Explore'), tr('Movies'), tr('Shows'), 'YouTube'];
+    for (var i = 0; i < TABS; i++) {
       var t = el('button', 'tab', tabs, names[i]);
       hover(t, Z.TOP, i);
     }
+    var re = el('button', 'tab refresh', tabs);
+    sym('sync', re, 30);
+    hover(re, Z.TOP, REFRESH);
     var buttons = $('buttons');
     buttons.innerHTML = '';
     var own = Prefs.boxInput() !== 'live';
-    var defs = [[own ? 'tv' : 'live_tv', own ? boxLabel() : tr('light|Live TV')], ['hdmi', tr('HDMI Inputs')], ['settings', tr('light|Settings')]];
+    var defs = [[own ? 'tv' : 'live_tv', own ? boxLabel() : tr('light|Live TV')], ['sparkles', 'Art'], ['settings', tr('light|Settings')]];
     for (var b = 0; b < 3; b++) {
       var r = el('button', 'round' + (b === 2 ? ' last' : ''), buttons);
       r.style.left = (1596 + 88 * b) + 'px';
       sym(defs[b][0], r);
       el('div', 'tip', r, defs[b][1]);
-      hover(r, Z.TOP, 3 + b);
+      hover(r, Z.TOP, BTN + b);
+    }
+  }
+
+  /** The refresh button: a new set of picks from a new part of the lists, and the newest YouTube videos. */
+  function refreshAll() {
+    Data.reloadPicks();
+    if (window.YouTube) YouTube.reload();
+    toast('Refreshing…');
+  }
+
+  /** The YouTube tab before there are videos: the code to enter at google.com/device, or what's happening. */
+  function renderYouTubePrompt(empty) {
+    var box = $('ytprompt'), on = st.tab === YT && empty && !!window.YouTube;
+    setClass(body, 'yt-empty', on);
+    if (!on) return;
+    if (!YouTube.signedIn()) YouTube.startSignIn();
+    var p = YouTube.prompt();
+    box.innerHTML = '';
+    if (p.code) {
+      el('div', 'head', box, 'Sign in to YouTube');
+      el('div', 'step', box, 'On your phone, go to ' + p.url + ' and enter:');
+      el('div', 'code', box, p.code);
+      el('div', 'step small', box, 'Then allow My TV to see your subscriptions. If Google warns the app isn\'t verified, choose Advanced → Go to My TV.');
+    } else {
+      el('div', 'step', box, p.text || 'Loading…');
     }
   }
 
@@ -498,11 +528,12 @@
   // MARK: - Picks and background
 
   function renderCards() {
-    var list = Data.picks(TAB_KIND[st.tab]);
+    var list = st.tab === YT ? (window.YouTube ? YouTube.cards() : []) : Data.picks(TAB_KIND[st.tab]);
     var holder = $('cards');
     setClass(body, 'no-picks', !list.length);
+    renderYouTubePrompt(!list.length);
     setClass(body, 'no-key', !Data.hasKey());   // as on Android: no title or tabs that could never show anything
-    if (!Data.hasKey() && st.zone === Z.TOP && st.top < 3) st.top = 3;
+    if (!Data.hasKey() && st.zone === Z.TOP && st.top < BTN) st.top = BTN;
     var same = list.length === cards.length;
     for (var i = 0; same && i < list.length; i++) same = list[i].id === cards[i].id && list[i].backdrop === cards[i].backdrop && list[i].meta === cards[i].meta;
     if (same && holder.children.length === list.length) return;
@@ -1382,6 +1413,17 @@
     return {app: app, params: via ? {contentTarget: 'nuvio://tmdb/' + (p.kind === 'tv' ? 'series' : 'movie') + '/' + p.id} : null};
   }
 
+  /** A YouTube card: that video in the YouTube app (as a phone casts it), or the app itself where that doesn't work. */
+  function playVideo(card) {
+    TV.playYouTube(card.video, function (ok) {
+      if (ok) return;
+      var app = Data.appFor('youtube');
+      for (var i = 0; !app && i < apps.length; i++) if (/youtube/i.test(apps[i].title) && !/music|kids/i.test(apps[i].title)) app = apps[i];
+      if (app) launcher(app.id, app.title)();
+      else toast("Couldn't open YouTube.");
+    });
+  }
+
   function launcher(id, name, params) {
     return function () {
       TV.launch(id, params || null, function (ok) {
@@ -1417,13 +1459,16 @@
   function activate() {
     switch (st.zone) {
       case Z.TOP:
-        if (st.top < 3) return;
-        if (st.top === 3) { var box2 = boxTV(); if (box2) launcher(box2.id, boxLabel())(); }
-        else if (st.top === 4) { st.zone = Z.SHELF; openDrawer(); st.drawer = 1 < drawerInputs ? 1 : 0; updateFocus(); }
+        if (st.top < TABS) return;
+        if (st.top === REFRESH) { refreshAll(); return; }
+        if (st.top === BTN) { var box2 = boxTV(); if (box2) launcher(box2.id, boxLabel())(); }
+        else if (st.top === BTN + 1) { if (window.Art) Art.show(); }
         else openSettings();
         return;
       case Z.CARDS:
-        var target = pickTarget(cards[st.card]);
+        var card = cards[st.card];
+        if (card && card.video) { playVideo(card); return; }
+        var target = pickTarget(card);
         if (target) launcher(target.app.id, target.app.title, target.params)();
         return;
       case Z.SHELF:
@@ -1477,7 +1522,7 @@
         else if (dy > 0) { openDrawer(); return; }
         else if (dy < 0) {
           if (cards.length) { st.zone = Z.CARDS; st.card = nearest(cardNodes, centerX(tiles[st.shelf])); }
-          else { st.zone = Z.TOP; st.top = Data.hasKey() ? st.tab : 3; }
+          else { st.zone = Z.TOP; st.top = Data.hasKey() ? st.tab : BTN; }
         }
         break;
       case Z.CARDS:
@@ -1487,10 +1532,10 @@
         break;
       case Z.TOP:
         if (dx) {
-          st.top = Math.max(Data.hasKey() ? 0 : 3, Math.min(5, st.top + dx));   // without the picks the tabs can't hold focus
-          if (st.top < 3) selectTab(st.top);   // as on Apple TV: focusing a tab selects it
+          st.top = Math.max(Data.hasKey() ? 0 : BTN, Math.min(BTN + 2, st.top + dx));   // without the picks the tabs can't hold focus
+          if (st.top < TABS) selectTab(st.top);   // as on Apple TV: focusing a tab selects it
         } else if (dy > 0) {
-          if (cards.length) { st.zone = Z.CARDS; st.card = Math.min(cards.length - 1, st.top < 3 ? 0 : cards.length - 1); }
+          if (cards.length) { st.zone = Z.CARDS; st.card = Math.min(cards.length - 1, st.top < BTN ? 0 : cards.length - 1); }
           else st.zone = Z.SHELF;
         }
         break;
@@ -1550,10 +1595,10 @@
       if (saverOn || (sheetOpen() !== (zone === Z.APPS || zone === Z.SETTINGS || zone === Z.EDIT || zone === Z.LANG || zone === Z.CITY || zone === Z.KEY || zone === Z.ABOUT))) return;
       if (zone === Z.DRAWER && st.zone !== Z.DRAWER) return;
       if (zone !== Z.DRAWER && st.zone === Z.DRAWER && zone !== Z.SHELF) return;
-      if (zone === Z.TOP && index < 3 && !Data.hasKey()) return;   // the tabs are hidden without the picks
+      if (zone === Z.TOP && index < BTN && !Data.hasKey()) return;   // the tabs are hidden without the picks
       if (zone === Z.SHELF && st.zone === Z.DRAWER) closeDrawer();
       st.zone = zone;
-      if (zone === Z.TOP) { st.top = index; if (index < 3) selectTab(index); }
+      if (zone === Z.TOP) { st.top = index; if (index < TABS) selectTab(index); }
       else if (zone === Z.CARDS) st.card = index;
       else if (zone === Z.SHELF) st.shelf = index;
       else if (zone === Z.DRAWER) st.drawer = index;
@@ -1616,9 +1661,15 @@
     $('dim').className = 'layer' + (level ? ' d' + level : '');
   }
 
-  /** The screensaver's photos: picks with an app on the TV. */
+  /** The screensaver's photos: every pick already shown with its photo (the pool grows through the day), in a new order. */
   function saverPhotos() {
-    return Data.showcase().filter(function (p) { return p.backdrop && Data.usable(p.app); });
+    var list = Data.pool().slice();
+    for (var i = list.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1)), t = list[i];
+      list[i] = list[j];
+      list[j] = t;
+    }
+    return list;
   }
 
   function showSaver() {
@@ -1633,7 +1684,9 @@
     el('div', 'time', clock);
     el('div', 'date', clock);
     el('div', 'title', clock);
+    var meta = el('div', 'meta', clock);
     var hint = el('div', 'hint', clock);
+    el('div', 'prayer', s);   // the next prayer, top right (tickSaverClock fills it)
     var front = a;
     function next() {
       if (!saverOn) return;
@@ -1643,6 +1696,7 @@
         back.style.backgroundImage = 'url(' + Data.image(p.backdrop, 'original') + ')';
         back.style.webkitTransform = back.style.transform = 'scale(1.0)';
         clock.children[2].textContent = p.title;
+        meta.textContent = p.meta || '';   // IMDb · Audience · genre · length · service
         saverPick = p;
         // With Watch from the screensaver on, OK opens this title's app (any other key only closes).
         var target = Prefs.saverWatch() ? pickTarget(p) : null;
@@ -1665,6 +1719,15 @@
     var d = new Date();
     clock.firstChild.textContent = formatDate('format|h:mm', d.getTime());
     clock.children[1].textContent = formatDate('format|EEEE, MMMM d', d.getTime());
+    var box = $('saver').querySelector('.prayer'), lines = window.Extras ? Extras.lines() : [];
+    if (!box) return;
+    box.innerHTML = '';
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].kind !== 'prayer') continue;
+      sym('bedtime', box, 26);
+      el('span', 'main', box, lines[i].main);
+      el('span', 'side', box, lines[i].side);
+    }
   }
 
   function hideSaver() {
@@ -1715,6 +1778,7 @@
 
   function poke(ok) {
     idleAt = Date.now();
+    if (window.Art && Art.isOn()) { Art.hide(); return true; }   // any button leaves the art
     if (ambientOn) { hideAmbient(); return true; }
     if (!saverOn) return false;
     var target = ok && Prefs.saverWatch() ? pickTarget(saverPick) : null;
@@ -1802,6 +1866,7 @@
   }
 
   if (window.Extras) Extras.onChange(renderInfo);
+  if (window.YouTube) YouTube.onChange(function () { if (st.tab === YT) renderCards(); });
 
   Data.onChange(function () {
     renderQuotes();
@@ -1855,8 +1920,11 @@
     checkNight();
     Data.refresh();
     if (window.Extras) Extras.refresh();
+    if (window.YouTube) YouTube.refresh();
+    renderCards();   // a new set of picks every 30 minutes (it does nothing when they're the same)
     applyDim();   // automatic: medium from 22:00, off again at 07:00
-    if (!saverOn && !ambientOn && !sheetOpen() && Date.now() - idleAt > SAVER_AFTER) {
+    var artOn = window.Art && Art.isOn();
+    if (!saverOn && !ambientOn && !artOn && !sheetOpen() && Date.now() - idleAt > SAVER_AFTER) {
       if (saverMode() === 'clock') showAmbient(); else showSaver();
     }
     if (saverOn) tickSaverClock($('saver').querySelector('.clock'));
