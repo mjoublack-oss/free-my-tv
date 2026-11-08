@@ -8,11 +8,12 @@ Your picks with their IMDb and audience scores, your YouTube subscriptions, 4K p
 your next prayer, your team's next match, and nothing you didn't ask for.
 
 ![Samsung Tizen](https://img.shields.io/badge/Samsung-Tizen%202017%2B-1428A0?logo=samsung&logoColor=white)
+![LG webOS](https://img.shields.io/badge/LG-webOS%203%2B-A50034?logo=lg&logoColor=white)
 ![No ads](https://img.shields.io/badge/ads-none-2ea44f)
 ![No account needed](https://img.shields.io/badge/account-not%20needed-2ea44f)
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
-[Features](#-features) · [Install](#-install-in-10-minutes) · [Set it up](#-first-time-setup-on-the-tv) · [Make it yours](#-make-it-yours) · [Build your own copy](#-build-your-own-copy) · [FAQ](#-faq) · [Privacy](#-privacy)
+[Features](#-features) · [Install](#-install-in-10-minutes) · [LG TVs](#-lg-tvs-webos) · [Set it up](#-first-time-setup-on-the-tv) · [Make it yours](#-make-it-yours) · [Build your own copy](#-build-your-own-copy) · [FAQ](#-faq) · [Privacy](#-privacy)
 
 <br>
 
@@ -52,13 +53,13 @@ your next prayer, your team's next match, and nothing you didn't ask for.
 | 🌤️ **Weather** | Now, the next hours or days, rain in the next two hours, UV and air quality. |
 | 🌙 **Calm by design** | Light by day, dark after sunset, dimming for a dark room, and a screensaver with your picks and their scores. |
 
-> Haven TV runs as an app on your Samsung TV. Samsung's own home screen stays where it is, and uninstalling Haven TV leaves the TV exactly as it was.
+> Haven TV runs as an app on your Samsung or LG TV. The TV's own home screen stays where it is, and uninstalling Haven TV leaves the TV exactly as it was.
 
 ---
 
 ## 🚀 Install in 10 minutes
 
-You need a **Samsung TV from 2017 or newer** (Tizen 3+) and a **computer on the same Wi-Fi**.
+You need a **Samsung TV from 2017 or newer** (Tizen 3+) and a **computer on the same Wi-Fi**. **LG TV?** See [LG TVs](#-lg-tvs-webos).
 
 ### 1. Turn on Developer Mode on the TV
 1. Press **Home** and open **Apps**.
@@ -79,6 +80,46 @@ Haven TV now appears in **Apps**. Move it to the first place in the home bar so 
 
 > **Tip:** TizenBrew Installer stops when the TV drops an idle connection ("Can't connect to the server"). Start it again and reload the page. On a Mac you can keep it running with
 > `while true; do ./TizenBrewInstaller-macos-arm64; sleep 2; done`
+
+---
+
+## 📺 LG TVs (webOS)
+
+Haven TV runs on **LG TVs with webOS 3 or newer** (2016 on) as an app, installed through LG's own **Developer Mode**. Nothing on the TV is rooted or changed, and LG's home screen stays where it is. You need a **computer on the same Wi-Fi** (Windows, Mac or Linux) for the install.
+
+### 1. Turn on Developer Mode on the TV
+1. On the computer, create a free **LG developer account** at [webostv.developer.lge.com](https://webostv.developer.lge.com) (*Sign in → Create account*).
+2. On the TV, open the **LG Content Store** (*Apps*), search for **Developer Mode** and install it.
+3. Open **Developer Mode**, sign in with that account, and switch **Dev Mode Status** on. The TV restarts.
+4. Open **Developer Mode** again and switch **Key Server** on. Note the **IP address** and the **passphrase** it shows (six letters and numbers, e.g. `A1B2C3`).
+
+### 2. Install Haven TV with webOS Dev Manager
+[webOS Dev Manager](https://github.com/webosbrew/dev-manager-desktop) is a free desktop app for exactly this: no command line, no LG SDK.
+
+1. Download **Haven TV for LG** (`HavenTV-webos.ipk`) from the [latest release](https://github.com/mjoublack-oss/haven-tv/releases/latest).
+2. Download and open **webOS Dev Manager** from [its releases](https://github.com/webosbrew/dev-manager-desktop/releases/latest) (Windows `.msi`, Mac `.dmg`, Linux `.deb` or `.AppImage`).
+3. **Add a device:** enter the TV's IP address and, when asked, the passphrase from the Developer Mode app.
+4. Open **Apps → Install** (the ⊕ / upload button), pick `HavenTV-webos.ipk`, and wait for *Installed*.
+
+**Haven TV** now appears in LG's app list.
+
+### 3. Make it one press away
+- **While Haven TV is open, hold a number key** on the remote (e.g. **1**) to pin it to that key. From then on, holding that key opens Haven TV from anywhere.
+- No number keys (Magic Remote)? Move Haven TV to the front of LG's app list with its **Edit** option, so it's the first app on the home screen.
+
+### 4. Keep Developer Mode alive
+LG switches Developer Mode off after **about 40 days** without renewal, and apps installed through it are removed (installing again brings Haven TV back). Either:
+- open the **Developer Mode** app on the TV now and then and press **Extend**, or
+- let **webOS Dev Manager** do it: its device page shows the time left with a **Renew** button, and it can create a script that renews on a schedule.
+
+### On LG, a few things differ
+| | |
+|---|---|
+| **Apps on the shelf** | webOS 6 and newer ask once, on the TV, whether Haven TV may see your apps: choose *Allow*. |
+| **YouTube tab** | Selecting a video opens the YouTube app; it doesn't jump straight into that video. |
+| **Home and Back from other apps** | LG's own home screen answers them; use your pinned number key to come back. |
+
+> **Prefer the command line?** `python3 webos/build.py --generic` builds the `.ipk`, and `python3 webos/install.py <TV-IP>` installs it (it asks for the passphrase the first time). `python3 webos/renew.py <TV-IP>` extends Developer Mode.
 
 ---
 
@@ -162,8 +203,9 @@ The release above is set up for its maintainer (Cork prayer times, Barcelona and
    { "accessKey": "…" }
    ```
    Without it, the Clock uses Bing's daily 4K photo only.
-5. **Build:** `python3 tizen/build.py --generic` → `FreeMyTV-tizen.wgt`.
-6. **Publish it** as a release of your fork (attach the `.wgt`), then install from TizenBrew Installer with **`your-name/your-fork`**.
+5. **Build:** `python3 tizen/build.py --generic` → `FreeMyTV-tizen.wgt` (Samsung), and `python3 webos/build.py --generic` → `FreeMyTV-webos.ipk` (LG).
+6. **Samsung:** publish a release of your fork with the `.wgt` attached, then install from TizenBrew Installer with **`your-name/your-fork`**.
+   **LG:** install the `.ipk` with webOS Dev Manager, or `python3 webos/install.py <TV-IP>`.
 
 `haven.properties`, `youtube.local.json` and `unsplash.local.json` are git-ignored: they stay on your computer and only go into the package you build.
 

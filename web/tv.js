@@ -244,7 +244,7 @@ var TV = (function () {
     });
   }
 
-  var self = 'io.freemytv';
+  var self = 'io.haventv';   // webos/appinfo.json's id; the TV's own answer below wins
   if (webos && window.PalmSystem && window.PalmSystem.identifier) self = window.PalmSystem.identifier.split(' ')[0];
   if (samsung) {
     try { self = window.tizen.application.getCurrentApplication().appInfo.id; } catch (e) {}
