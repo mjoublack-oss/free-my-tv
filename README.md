@@ -51,7 +51,7 @@ You need a **Samsung TV from 2017 or newer** (Tizen 3+) and a **computer on the 
    On a Mac it's a program that runs in Terminal: `chmod +x TizenBrewInstaller-macos-arm64 && ./TizenBrewInstaller-macos-arm64`
 2. Open **http://localhost:8091/ui/dist/index.html** in your browser.
 3. **Connect to TV** with your TV's IP address (TV: Settings → General → Network → Network Status → IP Settings).
-4. Choose install from GitHub and type **`mjoublack-oss/free-my-tv`**.
+4. Choose install from GitHub and type **`mjoublack-oss/haven-tv`**.
 5. TVs from 2023 on ask you to **sign in to your Samsung account** once: that's how the app gets signed for your TV.
 
 Haven TV now appears in **Apps**. Move it to the first place in the home bar so it's one press away.
