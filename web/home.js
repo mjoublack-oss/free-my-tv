@@ -445,7 +445,7 @@
 
   // The top row: four tabs (Explore, Movies, Shows, YouTube), the refresh button, then the three round buttons.
   var TAB_KIND = [null, 'movie', 'tv', 'youtube'];
-  var TABS = 4, YT = 3, REFRESH = 4, BTN = 5;
+  var TABS = 4, YT = 3, REFRESH = 4, BTN = 5, ROUND = 3;   // round buttons: Live TV, Clock, Settings
 
   function renderTop() {
     $('title').textContent = tr('For You');
@@ -462,10 +462,10 @@
     var buttons = $('buttons');
     buttons.innerHTML = '';
     var own = Prefs.boxInput() !== 'live';
-    var defs = [[own ? 'tv' : 'live_tv', own ? boxLabel() : tr('light|Live TV')], ['sparkles', 'Photos'], ['settings', tr('light|Settings')]];
-    for (var b = 0; b < 3; b++) {
-      var r = el('button', 'round' + (b === 2 ? ' last' : ''), buttons);
-      r.style.left = (1596 + 88 * b) + 'px';
+    var defs = [[own ? 'tv' : 'live_tv', own ? boxLabel() : tr('light|Live TV')], ['recents', 'Clock'], ['settings', tr('light|Settings')]];
+    for (var b = 0; b < ROUND; b++) {
+      var r = el('button', 'round' + (b === ROUND - 1 ? ' last' : ''), buttons);
+      r.style.left = (1772 - 88 * (ROUND - 1) + 88 * b) + 'px';
       sym(defs[b][0], r);
       el('div', 'tip', r, defs[b][1]);
       hover(r, Z.TOP, BTN + b);
@@ -1462,7 +1462,7 @@
         if (st.top < TABS) return;
         if (st.top === REFRESH) { refreshAll(); return; }
         if (st.top === BTN) { var box2 = boxTV(); if (box2) launcher(box2.id, boxLabel())(); }
-        else if (st.top === BTN + 1) { if (window.Art) Art.show(); }
+        else if (st.top === BTN + 1) { if (window.Art) Art.show(true); }   // Clock: the 4K photos with the time on top
         else openSettings();
         return;
       case Z.CARDS:
@@ -1532,7 +1532,7 @@
         break;
       case Z.TOP:
         if (dx) {
-          st.top = Math.max(Data.hasKey() ? 0 : BTN, Math.min(BTN + 2, st.top + dx));   // without the picks the tabs can't hold focus
+          st.top = Math.max(Data.hasKey() ? 0 : BTN, Math.min(BTN + ROUND - 1, st.top + dx));   // without the picks the tabs can't hold focus
           if (st.top < TABS) selectTab(st.top);   // as on Apple TV: focusing a tab selects it
         } else if (dy > 0) {
           if (cards.length) { st.zone = Z.CARDS; st.card = Math.min(cards.length - 1, st.top < BTN ? 0 : cards.length - 1); }

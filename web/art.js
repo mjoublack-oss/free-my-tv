@@ -174,14 +174,52 @@ var Art = (function () {
     captionTimer = setTimeout(function () { c.className = 'caption'; }, CAPTION);
   }
 
+  // MARK: - Clock: one quiet line at the top (time · date · next prayer and how long until it), no box
+
+  var clockTimer = 0;
+
+  /** "Isha in 1h 03m", or "Isha · Iqama in 12 min" between the adhan and the iqama (extras.js). */
+  function prayerText() {
+    var lines = window.Extras ? Extras.lines() : [];
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].kind !== 'prayer') continue;
+      var name = lines[i].main.split(' ')[0], side = lines[i].side.replace(/\s*·\s*approx\.$/, '');
+      return /^Iqama/.test(side) ? name + ' · ' + side : name + ' ' + side;
+    }
+    return '';
+  }
+
+  function tickClock() {
+    var line = layer && layer.querySelector('.clockline');
+    if (!line) return;
+    var now = Date.now(), p = prayerText();
+    line.innerHTML = '';
+    el('span', 't', line, formatDate('format|h:mm', now));
+    el('span', 'dot', line);
+    el('span', 's', line, formatDate('format|EEEE d MMMM', now));
+    if (p) {
+      el('span', 'dot', line);
+      var s = el('span', 's p', line);
+      var cut = p.indexOf(' ');
+      el('b', '', s, cut > 0 ? p.slice(0, cut) : p);
+      if (cut > 0) s.appendChild(document.createTextNode(p.slice(cut)));
+    }
+  }
+
   return {
     isOn: function () { return on; },
-    show: function () {
+    /** The photos; with `clock`, the time line over them too. */
+    show: function (clock) {
       if (on) return;
       layer = document.getElementById('art');
       layer.innerHTML = '';
       el('div', 'stage', layer);
       el('div', 'caption', layer);
+      if (clock) {
+        el('div', 'clockline', layer);
+        tickClock();
+        clockTimer = setInterval(tickClock, 10000);
+      }
       on = true;
       layer.className = 'layer on';
       applyLight();
@@ -194,6 +232,7 @@ var Art = (function () {
       clearTimeout(timer);
       clearTimeout(captionTimer);
       clearInterval(lightTimer);
+      clearInterval(clockTimer);
       if (layer) layer.className = 'layer';
     }
   };

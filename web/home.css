@@ -226,6 +226,22 @@ body.yt-empty #clock { display: none; }
   transition: opacity 1.5s;
 }
 #art .caption.on { opacity: 1; }
+/* Clock: one line at the top, no box; slightly see-through white with a soft shadow for bright skies. */
+#art .clockline {
+  position: absolute; left: 0; right: 0; top: 64px; z-index: 2;
+  text-align: center; white-space: nowrap;
+  color: rgba(255, 255, 255, 0.82);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 2px 24px rgba(0, 0, 0, 0.28);
+  -webkit-font-feature-settings: 'tnum'; font-feature-settings: 'tnum';
+  letter-spacing: 0.005em;
+}
+#art .clockline .t { font-size: 40px; font-weight: 400; color: rgba(255, 255, 255, 0.9); vertical-align: middle; }
+#art .clockline .s { font-size: 32px; font-weight: 400; vertical-align: middle; }
+#art .clockline .p b { font-weight: 600; }
+#art .clockline .dot {
+  display: inline-block; width: 6px; height: 6px; margin: 0 26px; border-radius: 3px;
+  background: rgba(255, 255, 255, 0.55); vertical-align: middle;
+}
 
 /* The screensaver: the pick's scores and service under its title, and the next prayer at the top right. */
 #saver .clock .meta {
@@ -256,7 +272,7 @@ body.yt-empty #clock { display: none; }
 /* The next prayer and the next matches (extras.js): right-aligned lines left of the round buttons. */
 #info {
   position: absolute;
-  right: 364px;
+  right: 364px;   /* left of the three round buttons */
   top: 52px;
   text-align: right;
   white-space: nowrap;
