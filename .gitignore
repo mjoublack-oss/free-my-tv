@@ -8,6 +8,7 @@ webos-icons.local/
 # This build's Google client for the YouTube tab: packed into the app, never committed
 youtube.local.json
 unsplash.local.json
+haven.properties
 
 # Build output
 out/

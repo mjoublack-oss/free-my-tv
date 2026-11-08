@@ -111,8 +111,10 @@ var Prefs = (function () {
       return /^hdmi[1-4]$/.test(k) ? k : 'live';
     },
     set: function (name, value) { v[name] = value; save(); this.version++; },
+    /** Any setting by name (Haven TV's: prayer, mosque, prayerMethod, asr, matches). */
+    get: function (name, fallback) { return pick(name, fallback); },
     setCoin: function (i, on) {
-      var c = (pick('coins', null) || [true, true, true, true]).slice();
+      var c = (pick('coins', null) || []).slice();
       c[i] = on;
       this.set('coins', c);
     }
@@ -308,12 +310,18 @@ var Data = (function () {
 
   // MARK: - Prices
 
-  // This build's price row: BTC, ETH and XRP from Binance, and Apple's stock (AAPL) from Yahoo Finance, all in dollars.
-  var COINS = ['BTC', 'ETH', 'XRP', 'AAPL'];
-  var NAMES = ['Bitcoin', 'Ethereum', 'XRP', 'Apple (AAPL)'];
-  var CRYPTO = 3;   // COINS[0..2] are Binance pairs; COINS[3] is the stock
+  // Haven TV's Markets card: the coins (Binance, in dollars) and the stocks (Yahoo Finance) in haven.properties' coins=
+  // and stocks= (BTC, ETH, XRP and AAPL without one). Home Settings switches each on or off.
+  var HAVEN_CFG = CONFIG.haven || {};
+  var CRYPTO_LIST = HAVEN_CFG.coins && HAVEN_CFG.coins.length ? HAVEN_CFG.coins : ['BTC', 'ETH', 'XRP'];
+  var STOCK_LIST = HAVEN_CFG.stocks ? HAVEN_CFG.stocks : ['AAPL'];
+  var COINS = CRYPTO_LIST.concat(STOCK_LIST);
+  var CRYPTO = CRYPTO_LIST.length;   // COINS[0 .. CRYPTO-1] are Binance pairs; the rest are stocks
+  var KNOWN = {BTC: 'Bitcoin', ETH: 'Ethereum', XRP: 'XRP', SOL: 'Solana', BNB: 'BNB', DOGE: 'Dogecoin', ADA: 'Cardano',
+    AAPL: 'Apple', MSFT: 'Microsoft', GOOGL: 'Alphabet', AMZN: 'Amazon', NVDA: 'Nvidia', TSLA: 'Tesla', META: 'Meta'};
+  var NAMES = COINS.map(function (s, i) { var n = KNOWN[s] || s; return i >= CRYPTO && n !== s ? n + ' (' + s + ')' : n; });
   var CURRENCY = 'USD', QUOTE = 'USDT';
-  var prices = [NaN, NaN, NaN, NaN], changes = [NaN, NaN, NaN, NaN], pricesAt = 0, fetchingPrices = false;
+  var prices = COINS.map(function () { return NaN; }), changes = COINS.map(function () { return NaN; }), pricesAt = 0, fetchingPrices = false;
   var stockAt = 0, stockTried = 0, fetchingStock = false;
 
   /** Indexes in COINS of the ones switched on in Home Settings. */
@@ -338,27 +346,30 @@ var Data = (function () {
     return found;
   }
 
-  /** Yahoo's chart answer: the last price and the change since the previous close. */
-  function parseStock(o) {
+  /** Yahoo's chart answer for COINS[i]: the last price and the change since the previous close. */
+  function parseStock(i, o) {
     var r = o && o.chart && o.chart.result && o.chart.result[0], m = r && r.meta;
     if (!m || !(m.regularMarketPrice > 0)) return false;
-    prices[CRYPTO] = m.regularMarketPrice;
+    prices[i] = m.regularMarketPrice;
     var prev = m.chartPreviousClose || m.previousClose;
-    changes[CRYPTO] = prev > 0 ? (m.regularMarketPrice - prev) / prev * 100 : NaN;
+    changes[i] = prev > 0 ? (m.regularMarketPrice - prev) / prev * 100 : NaN;
     return true;
   }
 
   (function () {
     var p = stored('prices');
-    if (p && p.quote === 'crypto-v2' && parsePrices(p.body)) pricesAt = p.at;
-    var s = stored('stock');
-    if (s && parseStock(s.body)) stockAt = s.at;
+    if (p && p.quote === 'crypto-v3:' + CRYPTO_LIST.join(',') && parsePrices(p.body)) pricesAt = p.at;
+    var s = stored('stocks') || {};
+    for (var i = CRYPTO; i < COINS.length; i++) if (s[COINS[i]] && parseStock(i, s[COINS[i]].body)) stockAt = Math.max(stockAt, s[COINS[i]].at);
   })();
 
   function refreshPrices() {
-    var coins = activeCoins(), now = Date.now(), symbols = [];
-    for (var i = 0; i < coins.length; i++) if (coins[i] < CRYPTO) symbols.push('%22' + COINS[coins[i]] + QUOTE + '%22');
-    if (coins.indexOf(CRYPTO) >= 0) refreshStock(now);
+    var coins = activeCoins(), now = Date.now(), symbols = [], stocks = [];
+    for (var i = 0; i < coins.length; i++) {
+      if (coins[i] < CRYPTO) symbols.push('%22' + COINS[coins[i]] + QUOTE + '%22');
+      else stocks.push(coins[i]);
+    }
+    if (stocks.length) refreshStocks(now, stocks);
     if (!symbols.length || fetchingPrices || (now - pricesAt < 5 * 60000 && now >= pricesAt)) return;
     fetchingPrices = true;
     var path = '/api/v3/ticker/24hr?type=MINI&symbols=%5B' + symbols.join(',') + '%5D';
@@ -373,31 +384,34 @@ var Data = (function () {
         }
         fetchingPrices = false;
         pricesAt = Date.now();
-        store('prices', {quote: 'crypto-v2', body: body, at: pricesAt});
+        store('prices', {quote: 'crypto-v3:' + CRYPTO_LIST.join(','), body: body, at: pricesAt});
         changed();
       });
     })(0);
   }
 
-  /** AAPL every 5 minutes (Yahoo's public chart data, no key); a failed try waits 5 minutes too. */
-  function refreshStock(now) {
+  /** The stocks every 5 minutes, one after the other (Yahoo's public chart data, no key); a failed try waits 5 minutes too. */
+  function refreshStocks(now, which) {
     if (fetchingStock || (now - stockAt < 5 * 60000 && now >= stockAt) || (now - stockTried < 5 * 60000 && now >= stockTried)) return;
     fetchingStock = true;
     stockTried = now;
-    var hosts = ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'];
-    (function next(h) {
-      get(hosts[h] + '/v8/finance/chart/AAPL?range=1d&interval=1d', {}, function (err, body) {
-        if (err || !parseStock(body)) {
-          if (h + 1 < hosts.length) next(h + 1);
-          else fetchingStock = false;
-          return;
-        }
+    var saved = stored('stocks') || {}, any = false, k = 0;
+    (function each() {
+      if (k >= which.length) {
         fetchingStock = false;
-        stockAt = Date.now();
-        store('stock', {body: body, at: stockAt});
-        changed();
-      });
-    })(0);
+        if (any) { stockAt = Date.now(); store('stocks', saved); changed(); }
+        return;
+      }
+      var i = which[k++], sym = COINS[i], hosts = ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'];
+      (function next(h) {
+        get(hosts[h] + '/v8/finance/chart/' + encodeURIComponent(sym) + '?range=1d&interval=1d', {}, function (err, body) {
+          if (err || !parseStock(i, body)) { if (h + 1 < hosts.length) next(h + 1); else each(); return; }
+          saved[sym] = {body: body, at: Date.now()};
+          any = true;
+          each();
+        });
+      })(0);
+    })();
   }
 
   // MARK: - Picks (TMDB)
@@ -841,6 +855,7 @@ var Data = (function () {
       return 'rainy';
     },
     coinName: function (i) { return NAMES[i]; },
+    isStock: function (i) { return i >= CRYPTO; },
     get stockAt() { return stockAt; }
   };
 })();

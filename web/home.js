@@ -28,8 +28,9 @@
     return s;
   }
 
+  /** COINS[i]'s logo: the coin's own (coins.js), a rising chart for a stock, or none. */
   function coin(i, parent) {
-    var c = window.COINS && window.COINS[i];
+    var icons = window.COIN_ICONS || {}, c = icons[Data.COINS[i]] || (Data.isStock(i) ? icons.STOCK : null);
     if (!c) return;
     var ns = 'http://www.w3.org/2000/svg';
     var svg = document.createElementNS(ns, 'svg');
@@ -920,11 +921,36 @@
       {label: tr('City'), value: Prefs.city() || '—', opens: true, city: true,
         step: function (d) { if (d >= 0) openCities(); }},
       {label: tr('Forecast'), value: Prefs.forecast() === 'days' ? tr('Next days') : tr('Next hours'),
-        step: function (d) { cycle('forecast', ['hours', 'days'], Prefs.forecast(), d); renderPanels(); }},
-      {label: tr('Quotes widget'), toggle: Prefs.quotes(),
-        step: function () { Prefs.set('quotes', !Prefs.quotes()); Data.settingsChanged(); }}
+        step: function (d) { cycle('forecast', ['hours', 'days'], Prefs.forecast(), d); renderPanels(); }}
     ];
-    var names = [Data.coinName(0), Data.coinName(1), Data.coinName(2), Data.coinName(3)];
+    // Prayer times: off, calculated for the weather's city (with a method), or a mosque's own timetable.
+    if (window.Extras) {
+      var pm = Extras.mode();
+      rows.push({label: 'Prayer times', value: pm === 'city' ? 'Calculated for ' + (Prefs.city() || 'my city') : pm === 'mosque' ? 'My mosque' : 'Off',
+        step: function (d) { cycle('prayer', ['off', 'city', 'mosque'], Extras.mode(), d); Extras.settingsChanged(); }});
+      if (pm !== 'off') {
+        var ms = Extras.METHODS, cur = Extras.method();
+        rows.push({label: pm === 'mosque' ? 'Method until it loads' : 'Calculation method', value: cur[1],
+          step: function (d) {
+            var keys = ms.map(function (x) { return x[0]; });
+            cycle('prayerMethod', keys, cur[0], d);
+            Extras.settingsChanged();
+          }});
+        rows.push({label: 'Asr', value: Extras.hanafi() ? 'Hanafi (later)' : 'Standard (Shafi\'i, Maliki, Hanbali)',
+          step: function (d) { cycle('asr', ['standard', 'hanafi'], Extras.hanafi() ? 'hanafi' : 'standard', d); Extras.settingsChanged(); }});
+      }
+      if (pm === 'mosque') {
+        rows.push({label: 'Mosque', value: Prefs.get('mosqueName', '') || Extras.mosque() || tr('Not set'), opens: true, mosque: true,
+          step: function (d) { if (d >= 0) openKey('mosque'); }});
+      }
+      if (Extras.hasTeams()) {
+        rows.push({label: 'Match lines', toggle: Prefs.get('matches', true) !== false,
+          step: function () { Prefs.set('matches', Prefs.get('matches', true) === false); Extras.settingsChanged(); }});
+      }
+    }
+    rows.push({label: tr('Quotes widget'), toggle: Prefs.quotes(),
+      step: function () { Prefs.set('quotes', !Prefs.quotes()); Data.settingsChanged(); }});
+    var names = Data.COINS.map(function (s, k) { return Data.coinName(k); });
     for (var i = 0; i < names.length; i++) {
       (function (i) {
         rows.push({label: names[i], toggle: Prefs.quotes() && Prefs.coin(i), dim: !Prefs.quotes(),
@@ -1174,11 +1200,19 @@
 
   // MARK: - TMDB key: typed on the TV, so builds without one (the releases) get the picks too; TMDB checks it first
 
-  var keyStatus = '', keyWarn = false, keyTimer = 0, keySeq = 0, keyAsking = false;
+  // The same sheet takes the MDBList key ('mdb') or the mosque's short name on themasjidapp.org ('mosque').
+  var keyStatus = '', keyWarn = false, keyTimer = 0, keySeq = 0, keyAsking = false, keyMode = 'mdb';
+  var CHECKING = {mdb: 'Checking the key with MDBList…', mosque: 'Looking up the mosque…'};
 
-  function keyRows() { return keyAsking ? 2 : Prefs.tmdbKeyOnTV() ? 3 : 2; }
+  function keySet() { return keyMode === 'mosque' ? !!Prefs.get('mosque', '') : Prefs.tmdbKeyOnTV(); }
+  function keyRows() { return keyAsking ? 2 : keySet() ? 3 : 2; }
 
   function keySteps() {
+    if (keyMode === 'mosque') {
+      return 'Your mosque\'s own adhan and iqama times, for the whole year.\n'
+        + '1. Find your mosque at themasjidapp.org (search by city).\n'
+        + '2. Its address ends in a short name, like themasjidapp.org/cicc: type that name here.';
+    }
     return 'The key brings the picks from your own MDBList lists, with their IMDb and audience scores.\n'
       + 'Free:\n1. Sign in at mdblist.com and make your lists (Movies, Shows).\n'
       + '2. Open Preferences → API key and type it here.';
@@ -1186,8 +1220,9 @@
 
   function renderKey() {
     var box = $('keypick').firstChild, old = fieldOf('keypick'), typed = old ? old.value : '', inField = typingIn('keypick');
+    var mosque = keyMode === 'mosque';
     box.innerHTML = '';
-    el('div', 'title', box, keyAsking ? 'Remove the MDBList key?' : 'MDBList key');
+    el('div', 'title', box, keyAsking ? (mosque ? 'Remove the mosque?' : 'Remove the MDBList key?') : (mosque ? 'Mosque' : 'MDBList key'));
     var list = el('div', 'list', box), holder = el('div', 'rows', list);
     list.style.height = keyRows() * 78 + 'px';
     if (keyAsking) {
@@ -1196,21 +1231,22 @@
       updateFocus();
       return;
     }
-    var keyField = textField(holder, Z.KEY, typed, 'API key', 'MDBList key');
+    var keyField = textField(holder, Z.KEY, typed, mosque ? 'Short name, e.g. cicc' : 'API key', mosque ? 'Mosque' : 'MDBList key');
     // A v3 key is lowercase hex: the TV's keyboard mustn't capitalize it (the city's field wants capitals).
     keyField.setAttribute('autocapitalize', 'none');
     keyField.setAttribute('autocorrect', 'off');
     var save = el('div', 'row', holder, tr('Save'));
     sym('chevron_right', el('span', 'value', save));
     hover(save, Z.KEY, 1);
-    if (Prefs.tmdbKeyOnTV()) hover(el('div', 'row', holder, tr('Remove the key')), Z.KEY, 2);
+    if (keySet()) hover(el('div', 'row', holder, mosque ? 'Remove the mosque' : tr('Remove the key')), Z.KEY, 2);
     if (keyStatus) setClass(el('div', 'hint', box, keyStatus), 'warn', keyWarn);
     el('div', 'hint steps', box, keySteps());
     if (inField) openField('keypick');
     updateFocus();
   }
 
-  function openKey() {
+  function openKey(mode) {
+    keyMode = mode === 'mosque' ? 'mosque' : 'mdb';
     setClass($('settings'), 'open', false);
     st.zone = Z.KEY;
     st.key = 0;
@@ -1226,7 +1262,7 @@
     keyStatus = text;
     keyWarn = !!warn;
     clearTimeout(keyTimer);
-    if (text && text !== 'Checking the key with MDBList…') keyTimer = setTimeout(function () {
+    if (text && text !== CHECKING.mdb && text !== CHECKING.mosque) keyTimer = setTimeout(function () {
       keyStatus = '';
       var line = st.zone === Z.KEY && $('keypick').querySelector('.hint:not(.steps)');
       if (line) line.parentNode.removeChild(line);
@@ -1243,7 +1279,8 @@
     var f = fieldOf('keypick'), typed = f ? f.value : '', key = cleanKey(typed);
     closeField('keypick');
     if (!typed.replace(/\s+/g, '')) { st.key = 0; openField('keypick'); updateFocus(); return; }
-    if (keyStatus === 'Checking the key with MDBList…') return;
+    if (keyStatus === CHECKING.mdb || keyStatus === CHECKING.mosque) return;
+    if (keyMode === 'mosque') { saveMosque(typed); return; }
     if (!key) { setKeyStatus("That doesn't look like an MDBList key.", true); return; }
     setKeyStatus('Checking the key with MDBList…');
     var mine = ++keySeq;   // an answer for a sheet already closed is dropped
@@ -1257,8 +1294,30 @@
     });
   }
 
-  /** Back to config.properties' key (none in the releases): the picks go. */
+  /** A mosque's short name (or its whole themasjidapp.org address): saved once its timetable could be read. */
+  function saveMosque(typed) {
+    setKeyStatus(CHECKING.mosque);
+    var mine = ++keySeq;
+    Extras.checkMosque(typed, function (err, name, slug) {
+      if (mine !== keySeq || st.zone !== Z.KEY) return;
+      if (err) { setKeyStatus("Couldn't find that mosque's timetable. Check the short name in its themasjidapp.org address.", true); return; }
+      Prefs.set('mosque', slug);
+      Prefs.set('mosqueName', name);
+      if (fieldOf('keypick')) fieldOf('keypick').value = '';
+      Extras.settingsChanged();
+      setKeyStatus('Saved: ' + name + '.');
+    });
+  }
+
+  /** Back to no key (the picks go), or no mosque (the times are calculated for the city meanwhile). */
   function removeKey() {
+    if (keyMode === 'mosque') {
+      Prefs.set('mosque', undefined);
+      Prefs.set('mosqueName', undefined);
+      closeKey();
+      Extras.settingsChanged();
+      return;
+    }
     Prefs.set('mdbKey', undefined);   // left out of the saved settings
     closeKey();
     Data.keyChanged();
@@ -1275,7 +1334,7 @@
     var f = fieldOf('keypick');
     if (f) f.value = '';
     openSettings();
-    for (var i = 0; i < rowsNow.length; i++) if (rowsNow[i].tmdb) st.row = i;
+    for (var i = 0; i < rowsNow.length; i++) if (keyMode === 'mosque' ? rowsNow[i].mosque : rowsNow[i].tmdb) st.row = i;
     updateFocus();
   }
 

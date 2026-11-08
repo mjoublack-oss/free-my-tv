@@ -1,20 +1,50 @@
 /*
- * This build's extra lines at the top right of the home screen, left of the round buttons:
- *  - the next prayer at the Cork Islamic Cultural Centre, with its iqama and a countdown. The mosque's own timetable
- *    (adhan and iqama for every day of the year) comes from its page on themasjidapp.org, read again every 6 hours and
- *    kept in localStorage; without it, the times are calculated here for Cork (adhan only);
- *  - the next match of Barcelona and of Trabzonspor (ESPN's public schedule, every competition), in the TV's time with
- *    a countdown, or LIVE with the score while it's on.
+ * Haven TV's lines at the top right of the home screen, left of the round buttons:
+ *  - the next prayer, with its iqama and a countdown. Home Settings → Prayer times picks how, or turns it off:
+ *      off      nothing anywhere (home screen, screensaver, Clock);
+ *      city     calculated here for the weather's city, with a calculation method (METHODS) and Asr rule;
+ *      mosque   a mosque's own adhan and iqama timetable for the whole year, from its page on themasjidapp.org
+ *               (read again every 6 hours, kept in localStorage); calculated for the city until it's read.
+ *    The defaults come from haven.properties at build time (CONFIG.haven), and the TV's choice wins;
+ *  - the next match of each team in haven.properties' teams (ESPN's public schedule, every competition), in the TV's
+ *    time with a countdown, or LIVE with the score while it's on. Home Settings → Match lines turns them off.
  * Plain ES5, like the rest of web/ (Tizen 3's Chromium).
  */
 var Extras = (function () {
   'use strict';
 
-  var MOSQUE_URL = 'https://themasjidapp.org/cicc';
-  var CORK = {lat: 51.8775, lon: -8.4913};
-  var TEAMS = [{id: 83, name: 'Barcelona'}, {id: 997, name: 'Trabzonspor'}];
+  var HAVEN = (window.CONFIG && window.CONFIG.haven) || {};
   var PRAYERS = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
   var LABELS = {fajr: 'Fajr', dhuhr: 'Dhuhr', asr: 'Asr', maghrib: 'Maghrib', isha: 'Isha'};
+
+  /** Calculation methods: [key, name, Fajr angle, Isha angle, or Isha as minutes after Maghrib]. */
+  var METHODS = [
+    ['MWL', 'Muslim World League', 18, 17],
+    ['Makkah', 'Umm al-Qura, Makkah', 18.5, 0, 90],
+    ['Egypt', 'Egyptian General Authority', 19.5, 17.5],
+    ['Karachi', 'University of Islamic Sciences, Karachi', 18, 18],
+    ['ISNA', 'Islamic Society of North America', 15, 15],
+    ['Dubai', 'Dubai (UAE)', 18.2, 18.2],
+    ['Kuwait', 'Kuwait', 18, 17.5],
+    ['Qatar', 'Qatar', 18, 0, 90],
+    ['Turkey', 'Diyanet, Turkey', 18, 17],
+    ['Singapore', 'Singapore, Malaysia, Indonesia', 20, 18],
+    ['Tehran', 'Institute of Geophysics, Tehran', 17.7, 14],
+    ['France', 'UOIF, France', 12, 12]
+  ];
+
+  function pref(name, fallback) { return window.Prefs && Prefs.get ? Prefs.get(name, fallback) : fallback; }
+
+  /** What Home Settings (or else haven.properties) says. */
+  function mode() { var m = pref('prayer', HAVEN.prayer || 'off'); return m === 'city' || m === 'mosque' ? m : 'off'; }
+  function mosque() { return String(pref('mosque', HAVEN.mosque || '')).replace(/^.*themasjidapp\.org\//, '').replace(/[^A-Za-z0-9_-]/g, ''); }
+  function method() {
+    var k = pref('prayerMethod', HAVEN.method || 'MWL');
+    for (var i = 0; i < METHODS.length; i++) if (METHODS[i][0] === k) return METHODS[i];
+    return METHODS[0];
+  }
+  function hanafi() { return pref('asr', HAVEN.asr || 'standard') === 'hanafi'; }
+  function teams() { return pref('matches', HAVEN.matches !== false) ? (HAVEN.teams || []) : []; }
 
   function store(key, value) { try { localStorage.setItem('fmtv.x.' + key, JSON.stringify(value)); } catch (e) {} }
   function stored(key) { try { return JSON.parse(localStorage.getItem('fmtv.x.' + key)); } catch (e) { return null; } }
@@ -104,23 +134,42 @@ var Extras = (function () {
     return out;
   }
 
-  function refreshMosque() {
-    var now = Date.now();
-    if (fetchingMosque || (timetable && now - timetable.at < 6 * 3600000 && now >= timetable.at)) return;
-    if (now - mosqueTried < 15 * 60000 && now >= mosqueTried) return;
+  /** The mosque's timetable, when that's what Home Settings asks for and it's this mosque's. */
+  function mosqueTable() {
+    return mode() === 'mosque' && timetable && timetable.slug === mosque() ? timetable : null;
+  }
+
+  function refreshMosque(force) {
+    var now = Date.now(), slug = mosque();
+    if (mode() !== 'mosque' || !slug || fetchingMosque) return;
+    var fresh = timetable && timetable.slug === slug && now - timetable.at < 6 * 3600000 && now >= timetable.at;
+    if (!force && (fresh || (now - mosqueTried < 15 * 60000 && now >= mosqueTried))) return;
     mosqueTried = now;
     fetchingMosque = true;
-    fetchText(MOSQUE_URL, function (err, html) {
+    fetchText('https://themasjidapp.org/' + slug, function (err, html) {
       fetchingMosque = false;
       var t = err ? null : parseMosque(html);
       if (!t) return;   // kept: yesterday's copy still has the whole year
+      t.slug = slug;
       timetable = t;
       store('mosque', t);
       changed();
     });
   }
 
-  // MARK: - Prayer times: calculated for Cork when the mosque's page can't be read
+  /** Whether a mosque's page can be read, before it's saved: done(error, its name). */
+  function checkMosque(slug, done) {
+    slug = String(slug || '').replace(/^.*themasjidapp\.org\//, '').replace(/[^A-Za-z0-9_-]/g, '');
+    if (!slug) { done(new Error('empty')); return; }
+    fetchText('https://themasjidapp.org/' + slug, function (err, html) {
+      var t = err ? null : parseMosque(html);
+      if (!t) { done(err || new Error('no timetable on that page')); return; }
+      var m = /"name":"([^"]+)"/.exec(html);
+      done(null, m ? m[1] : slug, slug);
+    });
+  }
+
+  // MARK: - Prayer times: calculated for the weather's city (any country), with the method chosen in Home Settings
 
   var RAD = Math.PI / 180;
   function sunPosition(jd) {
@@ -133,27 +182,33 @@ var Extras = (function () {
     return {decl: Math.asin(Math.sin(e * RAD) * Math.sin(L * RAD)) / RAD, eqt: eqt};
   }
 
-  /** Muslim World League angles (Fajr 18°, Isha 17°), Shafi'i Asr, middle-of-the-night rule for Cork's summer nights. */
+  /**
+   * The method's Fajr and Isha angles (or Isha a fixed time after Maghrib), Shafi'i or Hanafi Asr, and the middle-of-
+   * the-night rule where the sun doesn't go deep enough (northern summers). The place is the weather's city.
+   */
   function calculated(day) {
+    var lat = parseFloat(window.Prefs ? Prefs.latitude() : 0) || 0, lon = parseFloat(window.Prefs ? Prefs.longitude() : 0) || 0;
+    var m0 = method(), asrFactor = hanafi() ? 2 : 1;
     var y = day.getFullYear(), mo = day.getMonth() + 1, dd = day.getDate();
     if (mo <= 2) { y -= 1; mo += 12; }
     var A = Math.floor(y / 100), B = 2 - A + Math.floor(A / 4);
-    var jd = Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (mo + 1)) + dd + B - 1524.5 - CORK.lon / 360;
+    var jd = Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (mo + 1)) + dd + B - 1524.5 - lon / 360;
     var zone = -day.getTimezoneOffset() / 60;
     function noon(t) { return 12 - sunPosition(jd + t).eqt; }
     function hourAngle(angle, t, ccw) {
-      var p = sunPosition(jd + t), x = (-Math.sin(angle * RAD) - Math.sin(p.decl * RAD) * Math.sin(CORK.lat * RAD))
-          / (Math.cos(p.decl * RAD) * Math.cos(CORK.lat * RAD));
+      var p = sunPosition(jd + t), x = (-Math.sin(angle * RAD) - Math.sin(p.decl * RAD) * Math.sin(lat * RAD))
+          / (Math.cos(p.decl * RAD) * Math.cos(lat * RAD));
       if (x > 1 || x < -1) return NaN;
       var h = Math.acos(x) / RAD / 15;
       return noon(t) + (ccw ? -h : h);
     }
     function asr(t) {
-      var p = sunPosition(jd + t), angle = -Math.atan(1 / (1 + Math.tan(Math.abs(CORK.lat - p.decl) * RAD))) / RAD;
+      var p = sunPosition(jd + t), angle = -Math.atan(1 / (asrFactor + Math.tan(Math.abs(lat - p.decl) * RAD))) / RAD;
       return hourAngle(angle, t, false);
     }
     var sunrise = hourAngle(0.833, 6 / 24, true), sunset = hourAngle(0.833, 18 / 24, false);
-    var fajr = hourAngle(18, 5 / 24, true), isha = hourAngle(17, 18 / 24, false);
+    var fajr = hourAngle(m0[2], 5 / 24, true);
+    var isha = m0[4] ? sunset + m0[4] / 60 : hourAngle(m0[3], 18 / 24, false);
     var night = 24 - (sunset - sunrise);
     if (isNaN(fajr) || sunrise - fajr > night / 2) fajr = sunrise - night / 2;
     if (isNaN(isha) || isha - sunset > night / 2) isha = sunset + night / 2;
@@ -161,7 +216,7 @@ var Extras = (function () {
     var out = {};
     for (var k in times) {
       if (!times.hasOwnProperty(k)) continue;
-      var hours = times[k] + zone - CORK.lon / 15, h = Math.floor(hours), m = Math.round((hours - h) * 60);
+      var hours = times[k] + zone - lon / 15, h = Math.floor(hours), m = Math.round((hours - h) * 60);
       out[k] = new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, m).getTime();
     }
     return out;
@@ -170,15 +225,15 @@ var Extras = (function () {
   /** The day's prayers, [{key, name, adhan, iqama, juma}], from the mosque's timetable or calculated. */
   function prayersOn(day) {
     var key = String(Math.min(dayOfYear(day), 365)), list = [];
-    var friday = day.getDay() === 5;
-    var a = timetable && timetable.adhan[key], q = timetable && timetable.iqama[key];
+    var friday = day.getDay() === 5, t = mosqueTable();
+    var a = t && t.adhan[key], q = t && t.iqama[key];
     var calc = a ? null : calculated(day);
     for (var i = 0; i < PRAYERS.length; i++) {
       var k = PRAYERS[i], p = {key: k, name: LABELS[k], adhan: a ? at(day, a[k]) : calc[k], iqama: q ? at(day, q[k]) : 0};
-      if (k === 'dhuhr' && friday && timetable && timetable.jumuah.length) {
+      if (k === 'dhuhr' && friday && t && t.jumuah.length) {
         p.name = 'Jumuah';
-        p.juma = timetable.jumuah;
-        p.adhan = at(day, timetable.jumuah[0]);
+        p.juma = t.jumuah;
+        p.adhan = at(day, t.jumuah[0]);
         p.iqama = 0;
       }
       if (p.adhan) list.push(p);
@@ -196,6 +251,7 @@ var Extras = (function () {
 
   /** The line on the home screen: {main, side}, or null. */
   function prayerLine(now) {
+    if (mode() === 'off') return null;
     var p = nextPrayer(now);
     if (!p) return null;
     var main;
@@ -204,8 +260,9 @@ var Extras = (function () {
     var side;
     if (p.adhan > now) side = countdown(p.adhan - now);
     else side = 'Iqama ' + countdown(p.iqama - now);
-    if (!timetable) side += ' · approx.';   // calculated here: the mosque's page couldn't be read yet
-    return {main: main, side: side, estimated: !timetable};
+    var guessed = mode() === 'mosque' && !mosqueTable();   // the mosque's page couldn't be read yet: calculated meanwhile
+    if (guessed) side += ' · approx.';
+    return {main: main, side: side, estimated: guessed};
   }
 
   // MARK: - Matches (ESPN)
@@ -281,18 +338,29 @@ var Extras = (function () {
     onChange: function (fn) { listeners.push(fn); },
     refresh: function () {
       refreshMosque();
-      for (var i = 0; i < TEAMS.length; i++) refreshMatch(TEAMS[i]);
+      var t = teams();
+      for (var i = 0; i < t.length; i++) refreshMatch(t[i]);
     },
     /** The lines for the top right, in order: the prayer, then each team's match. */
     lines: function () {
-      var now = Date.now(), out = [], p = prayerLine(now);
+      var now = Date.now(), out = [], p = prayerLine(now), t = teams();
       if (p) out.push({kind: 'prayer', main: p.main, side: p.side, estimated: p.estimated});
-      for (var i = 0; i < TEAMS.length; i++) {
-        var m = matchLine(TEAMS[i], now);
+      for (var i = 0; i < t.length; i++) {
+        var m = matchLine(t[i], now);
         if (m) out.push({kind: 'match', main: m.main, side: m.side, live: m.live});
       }
       return out;
     },
+    // Home Settings.
+    METHODS: METHODS,
+    mode: mode,
+    mosque: mosque,
+    method: method,
+    hanafi: hanafi,
+    hasTeams: function () { return !!(HAVEN.teams && HAVEN.teams.length); },
+    checkMosque: checkMosque,
+    /** A setting changed on the TV: the line again now (and the new mosque's timetable). */
+    settingsChanged: function () { refreshMosque(true); changed(); },
     // For checks in a browser's console.
     _prayersOn: prayersOn,
     _calculated: calculated,

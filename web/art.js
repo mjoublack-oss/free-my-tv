@@ -14,9 +14,12 @@
 var Art = (function () {
   'use strict';
 
-  var EVERY = 30000, CAPTION = 10000;   // a new photo every 30 seconds, its caption for the first 10
+  // haven.properties: photo_seconds (30 by default) and photo_themes (Unsplash searches).
+  var HAVEN = (window.CONFIG && window.CONFIG.haven) || {};
+  var EVERY = Math.max(10, HAVEN.photoSeconds || 30) * 1000, CAPTION = Math.min(10000, EVERY / 3);
   var UNSPLASH_KEY = (window.CONFIG && window.CONFIG.unsplash && window.CONFIG.unsplash.accessKey) || '';
-  var THEMES = ['landscape', 'nature', 'mountains', 'ocean', 'forest', 'lake', 'aerial landscape', 'night sky'];
+  var THEMES = HAVEN.photoThemes && HAVEN.photoThemes.length ? HAVEN.photoThemes
+    : ['landscape', 'nature', 'mountains', 'ocean', 'forest', 'lake', 'aerial landscape', 'night sky'];
 
   function store(key, value) { try { localStorage.setItem('fmtv.photos.' + key, JSON.stringify(value)); } catch (e) {} }
   function stored(key) { try { return JSON.parse(localStorage.getItem('fmtv.photos.' + key)); } catch (e) { return null; } }
