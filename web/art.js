@@ -1,24 +1,25 @@
 /*
- * Art: the round button between Live TV and Settings shows paintings the way a Frame TV's Art Mode does: over the whole
- * screen (landscape-format works only, so the crop stays small), a little softer and warmer than a screen would draw
- * it, with a faint canvas grain and a soft falloff at the edges, and dimmer as the evening comes (the TV's light sensor isn't open to apps: the city's sunrise and
- * sunset stand in for the room's light). A new painting every 3 minutes; its title and painter for the first 45 seconds.
- * Any button goes back to the home screen.
+ * Photos: the round button between Live TV and Settings shows 4K photographs over the whole screen, Frame-TV style:
+ * a new one every 30 seconds, its caption for the first 10, dimmer as the evening comes (the TV's light sensor
+ * isn't open to apps: the city's sunrise and sunset stand in for the room's light). Any button goes back.
  *
- * The paintings: public-domain Impressionism and landscapes from The Metropolitan Museum of Art's Open Access collection
- * (European Paintings), no key. The list of works is read once a week and kept; each painting's record when it's shown.
+ * Two sources, taken in turn:
+ *  - Bing's photo of the day, in true 3840 × 2160 (no key). Bing offers the last 8 days; every one seen is kept here, so
+ *    the collection grows by one a day. Shown as wallpaper on this screen, as Microsoft allows.
+ *  - Unsplash (unsplash.com): landscape-format photos on the themes in THEMES, sized by Unsplash to 3840 × 2160, with
+ *    the photographer credited in the caption, as Unsplash asks. Needs a free access key (CONFIG.unsplash.accessKey,
+ *    packed in from unsplash.local.json, which git leaves out); without one, Bing alone.
  * Plain ES5, like the rest of web/.
  */
 var Art = (function () {
   'use strict';
 
-  var SEARCH = 'https://collectionapi.metmuseum.org/public/collection/v1.1/search?departmentId=11&hasImages=true&isPublicDomain=true&limit=100&offset=0&q=';
-  var OBJECT = 'https://collectionapi.metmuseum.org/public/collection/v1/objects/';
-  var PAINTERS = ['Monet', 'Renoir', 'Pissarro', 'Sisley', 'van Gogh', 'Cezanne', 'Corot', 'Seurat', 'Morisot', 'Cassatt', 'Caillebotte'];
-  var EVERY = 3 * 60000, CAPTION = 45000, WEEK = 7 * 864e5;
+  var EVERY = 30000, CAPTION = 10000;   // a new photo every 30 seconds, its caption for the first 10
+  var UNSPLASH_KEY = (window.CONFIG && window.CONFIG.unsplash && window.CONFIG.unsplash.accessKey) || '';
+  var THEMES = ['landscape', 'nature', 'mountains', 'ocean', 'forest', 'lake', 'aerial landscape', 'night sky'];
 
-  function store(key, value) { try { localStorage.setItem('fmtv.art.' + key, JSON.stringify(value)); } catch (e) {} }
-  function stored(key) { try { return JSON.parse(localStorage.getItem('fmtv.art.' + key)); } catch (e) { return null; } }
+  function store(key, value) { try { localStorage.setItem('fmtv.photos.' + key, JSON.stringify(value)); } catch (e) {} }
+  function stored(key) { try { return JSON.parse(localStorage.getItem('fmtv.photos.' + key)); } catch (e) { return null; } }
 
   function getJson(url, done) {
     var x = new XMLHttpRequest(), over = false;
@@ -41,74 +42,84 @@ var Art = (function () {
     return a;
   }
 
-  // MARK: - The list of paintings
+  // MARK: - Bing: the photo of the day, every one kept
 
-  var pool = stored('pool');   // {ids: [...], at}
-  var fetchingPool = false;
+  var bing = stored('bing') || {photos: [], at: 0};   // photos: [{id, src, caption}]
 
-  /** The painters' works, then landscapes, one search after the other; the ones already kept stay meanwhile. */
-  function loadPool(done) {
-    if (pool && pool.ids.length && Date.now() - pool.at < WEEK) { done(); return; }
-    if (fetchingPool) { done(); return; }
-    fetchingPool = true;
-    var queries = PAINTERS.concat(['landscape']), ids = [], seen = {}, i = 0;
-    (function next() {
-      if (i >= queries.length) {
-        fetchingPool = false;
-        if (ids.length) { pool = {ids: shuffle(ids), at: Date.now()}; store('pool', pool); }
-        done();
-        return;
+  function refreshBing(done) {
+    if (Date.now() - bing.at < 6 * 3600000 && bing.photos.length) { done(); return; }
+    getJson('https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=8&mkt=en-GB', function (err, o) {
+      var have = {}, list = bing.photos.slice();
+      for (var i = 0; i < list.length; i++) have[list[i].id] = true;
+      for (var k = 0; !err && o && o.images && k < o.images.length; k++) {
+        var im = o.images[k];
+        if (!im.urlbase || have[im.urlbase] || im.wp === false) continue;
+        // "Lake Braies, Dolomites, Italy (© leonid_tit/Getty Images)" → "Lake Braies, Dolomites, Italy  ·  © leonid_tit/Getty Images"
+        list.push({id: im.urlbase, src: 'https://www.bing.com' + im.urlbase + '_UHD.jpg',
+          caption: (im.copyright || '').replace(/\s*\((©[^)]*)\)\s*$/, '  ·  $1')});
       }
-      getJson(SEARCH + encodeURIComponent(queries[i++]), function (err, o) {
-        var list = (!err && o && o.objectIDs) || [];
-        for (var k = 0; k < list.length; k++) if (!seen[list[k]]) { seen[list[k]] = true; ids.push(list[k]); }
-        next();
-      });
-    })();
+      if (!err) { bing = {photos: list.slice(-400), at: Date.now()}; store('bing', bing); }
+      done();
+    });
+  }
+
+  // MARK: - Unsplash: landscape-format photos on the themes, 30 at a time
+
+  var unsplash = stored('unsplash') || {photos: [], at: 0}, theme = stored('theme') || 0;
+
+  function refreshUnsplash(done) {
+    // A new batch of 30 every 15 minutes: at one photo every 30 seconds, about when the last one has been shown
+    // (4 requests an hour, inside Unsplash's 50).
+    if (!UNSPLASH_KEY || (unsplash.photos.length > 5 && Date.now() - unsplash.at < 15 * 60000)) { done(); return; }
+    var q = THEMES[theme++ % THEMES.length];
+    store('theme', theme);
+    getJson('https://api.unsplash.com/photos/random?count=30&orientation=landscape&content_filter=high&query='
+        + encodeURIComponent(q) + '&client_id=' + encodeURIComponent(UNSPLASH_KEY), function (err, list) {
+      var out = [];
+      for (var i = 0; !err && list && i < list.length; i++) {
+        var p = list[i];
+        // Only photos taken big enough for a 4K screen, and wide (the crop to 16:9 stays small).
+        if (!p.urls || !p.urls.raw || p.width < 3840 || p.width / p.height < 1.3) continue;
+        var where = p.location && (p.location.title || p.location.name);
+        var what = p.alt_description ? p.alt_description.charAt(0).toUpperCase() + p.alt_description.slice(1) : '';
+        out.push({id: p.id, src: p.urls.raw + '&w=3840&h=2160&fit=crop&crop=entropy&q=85&fm=jpg',
+          caption: (where || what) + '  ·  Photo by ' + ((p.user && p.user.name) || 'Unsplash') + ' on Unsplash'});
+      }
+      if (!err && out.length) { unsplash = {photos: out, at: Date.now()}; queue.unsplash = []; store('unsplash', unsplash); }
+      done();
+    });
   }
 
   // MARK: - Showing them
 
-  var on = false, timer = 0, captionTimer = 0, index = stored('index') || 0, layer = null;
-  var narrow = stored('narrow') || {};   // works found to be portrait-format, left out from then on
+  var on = false, timer = 0, captionTimer = 0, lightTimer = 0, layer = null, turn = stored('turn') || 0;
+  var queue = {bing: [], unsplash: []};
 
-  /**
-   * Landscapes and scenery only, by The Met's subject tags: at least one place-or-nature tag, and none of nudes, religious
-   * scenes or portraits (a living room, not a gallery's every room).
-   */
-  var SCENERY = /landscape|seascape|cityscape|river|pond|lake|sea\b|ocean|coast|beach|mountain|forest|tree|garden|water lil|bridge|field|harbor|harbour|village|snow|sunset|sunrise|cliff|valley|meadow|haystack|boat/i;
-  var NOT_HERE = /nude|bacchant|venus|nymph|christ|saint|virgin|madonna|crucifi|religio|biblical|angel|portrait|death|battle/i;
-  function scenery(o) {
-    var tags = (o.tags || []).map(function (t) { return t.term || ''; }).join(', ') + ', ' + (o.title || '');
-    return SCENERY.test(tags) && !NOT_HERE.test(tags);
+  /** The next photo: Bing and Unsplash in turn (two Unsplash for each Bing: Bing's set grows slowly), never the same twice in a row. */
+  function nextPhoto() {
+    function from(name, all) {
+      if (!queue[name].length) queue[name] = shuffle(all.slice());
+      return queue[name].shift() || null;
+    }
+    turn++;
+    store('turn', turn);
+    var useBing = !UNSPLASH_KEY || !unsplash.photos.length || turn % 3 === 0;
+    return (useBing ? from('bing', bing.photos) : from('unsplash', unsplash.photos)) || from('bing', bing.photos) || from('unsplash', unsplash.photos);
   }
 
-  function wide(id, yes) {
-    if (yes || narrow[id]) return;
-    narrow[id] = 1;
-    store('narrow', narrow);
-  }
-
-  /** How bright the painting looks: as the room's light goes, from 0.95 at midday to 0.62 late at night. */
+  /** How bright the photo looks: as the room's light goes, from full at midday to 0.6 late at night. */
   function brightness() {
     var now = new Date(), w = window.Data && Data.weather, mins = now.getHours() * 60 + now.getMinutes();
     function hm(t, fallback) { if (!t) return fallback; var x = new Date(t); return x.getHours() * 60 + x.getMinutes(); }
     var rise = hm(w && w.sunrise, 7 * 60), set = hm(w && w.sunset, 17 * 60), noon = (rise + set) / 2;
-    if (mins >= rise && mins <= set) {
-      // Day: brightest around noon, a little lower toward sunrise and sunset.
-      var half = (set - rise) / 2, f = 1 - Math.abs(mins - noon) / half;
-      return 0.84 + 0.11 * f;
-    }
-    // Evening and night: down over the two hours after sunset to the night level, and back up before sunrise.
+    if (mins >= rise && mins <= set) return 0.88 + 0.12 * (1 - Math.abs(mins - noon) / ((set - rise) / 2));
     var after = mins > set ? mins - set : mins + 1440 - set, before = mins < rise ? rise - mins : rise + 1440 - mins;
-    var t = Math.min(1, Math.min(after, before) / 120);
-    return 0.84 - 0.22 * t;
+    return 0.88 - 0.28 * Math.min(1, Math.min(after, before) / 120);
   }
 
   function applyLight() {
     if (!layer) return;
-    var b = brightness().toFixed(3);
-    var f = 'brightness(' + b + ') contrast(0.94) saturate(0.92) sepia(0.06)';
+    var f = 'brightness(' + brightness().toFixed(3) + ')';
     layer.style.webkitFilter = layer.style.filter = f;
   }
 
@@ -120,49 +131,38 @@ var Art = (function () {
     return e;
   }
 
-  /** The next painting: its record, then its image; one that can't be read is skipped. */
   function showNext(tries) {
     if (!on) return;
     clearTimeout(timer);
-    if (!pool || !pool.ids.length) { loadPool(function () { if (pool && pool.ids.length) showNext(0); else caption('The paintings couldn\'t be loaded. Check the internet and try again.'); }); return; }
-    if (tries > 25) { timer = setTimeout(function () { showNext(0); }, 60000); return; }
-    var id = pool.ids[index++ % pool.ids.length];
-    store('index', index);
-    if (narrow[id]) { showNext(tries); return; }   // a portrait-format work seen before: skipped without a request
-    getJson(OBJECT + id, function (err, o) {
-      if (!on) return;
-      var src = !err && o && o.isPublicDomain && (o.primaryImageSmall || o.primaryImage);
-      if (!src) { showNext(tries + 1); return; }
-      if (!scenery(o)) { wide(id, false); showNext(tries + 1); return; }   // not a landscape: left out from then on
-      var img = new Image();
-      img.onload = function () {
+    var p = nextPhoto();
+    if (!p) {
+      refreshBing(function () { refreshUnsplash(function () {
         if (!on) return;
-        // The painting fills the screen: only landscape-format works, so the crop to 16:9 stays small.
-        if (img.width / img.height < 1.2) { wide(id, false); showNext(tries + 1); return; }
-        wide(id, true);
-        place(img, o);
-        timer = setTimeout(function () { showNext(0); }, EVERY);
-      };
-      img.onerror = function () { showNext(tries + 1); };
-      img.src = src;
-    });
+        if (bing.photos.length || unsplash.photos.length) showNext(0);
+        else caption('The photos couldn\'t be loaded. Check the internet and try again.');
+      }); });
+      return;
+    }
+    var img = new Image();
+    img.onload = function () {
+      if (!on) return;
+      place(img, p);
+      timer = setTimeout(function () { refreshBing(function () { refreshUnsplash(function () { showNext(0); }); }); }, EVERY);
+    };
+    img.onerror = function () { if (tries < 5) showNext(tries + 1); else timer = setTimeout(function () { showNext(0); }, 60000); };
+    img.src = p.src;
   }
 
-  /** The painting over the whole screen (cropped a little to 16:9), with the canvas grain over it, fading in. */
-  function place(img, o) {
+  function place(img, p) {
     var stage = layer.querySelector('.stage');
     var old = stage.querySelector('.piece');
     var piece = el('div', 'piece', stage);
-    var canvas = el('div', 'canvas', piece);
-    canvas.style.backgroundImage = 'url(' + img.src + ')';
-    el('div', 'grain', piece);
-    el('div', 'edge', piece);
+    el('div', 'canvas', piece).style.backgroundImage = 'url(' + img.src + ')';
     setTimeout(function () {
       piece.className = 'piece on';
       if (old) { old.className = 'piece'; setTimeout(function () { if (old.parentNode) old.parentNode.removeChild(old); }, 2500); }
     }, 50);
-    var who = o.artistDisplayName || '';
-    caption((o.title || '') + (who ? ' — ' + who : '') + (o.objectDate ? ', ' + o.objectDate : ''));
+    caption(p.caption);
     applyLight();
   }
 
@@ -173,8 +173,6 @@ var Art = (function () {
     clearTimeout(captionTimer);
     captionTimer = setTimeout(function () { c.className = 'caption'; }, CAPTION);
   }
-
-  var lightTimer = 0;
 
   return {
     isOn: function () { return on; },
@@ -188,7 +186,7 @@ var Art = (function () {
       layer.className = 'layer on';
       applyLight();
       lightTimer = setInterval(applyLight, 60000);
-      showNext(0);
+      refreshBing(function () { refreshUnsplash(function () { showNext(0); }); });
     },
     hide: function () {
       if (!on) return;

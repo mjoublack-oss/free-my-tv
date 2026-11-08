@@ -189,9 +189,7 @@ body.yt-empty #clock { display: none; }
   z-index: 60;
   opacity: 0;
   visibility: hidden;
-  background: #ECE6DC;
-  background: -webkit-radial-gradient(center, ellipse, #F1ECE3 0%, #E6DFD3 100%);
-  background: radial-gradient(ellipse at center, #F1ECE3 0%, #E6DFD3 100%);
+  background: #000;
   -webkit-transition: opacity 0.8s, visibility 0s 0.8s;
   transition: opacity 0.8s, visibility 0s 0.8s;
 }
