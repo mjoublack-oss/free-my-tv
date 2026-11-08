@@ -463,7 +463,7 @@
     var buttons = $('buttons');
     buttons.innerHTML = '';
     var own = Prefs.boxInput() !== 'live';
-    var defs = [[own ? 'tv' : 'live_tv', own ? boxLabel() : tr('light|Live TV')], ['recents', 'Clock'], ['settings', tr('light|Settings')]];
+    var defs = [[own ? 'tv' : 'live_tv', own ? boxLabel() : tr('light|Live TV')], ['schedule', 'Clock'], ['settings', tr('light|Settings')]];
     for (var b = 0; b < ROUND; b++) {
       var r = el('button', 'round' + (b === ROUND - 1 ? ' last' : ''), buttons);
       r.style.left = (1772 - 88 * (ROUND - 1) + 88 * b) + 'px';

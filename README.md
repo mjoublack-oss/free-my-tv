@@ -14,7 +14,28 @@ your next prayer, your team's next match, and nothing you didn't ask for.
 
 [Features](#-features) · [Install](#-install-in-10-minutes) · [Set it up](#-first-time-setup-on-the-tv) · [Make it yours](#-make-it-yours) · [Build your own copy](#-build-your-own-copy) · [FAQ](#-faq) · [Privacy](#-privacy)
 
+<br>
+
+<img src="docs/haven/home.jpg" alt="Haven TV home screen: picks with IMDb and audience scores, the next prayer, the next matches with a live score, and the app shelf" width="100%">
+
+<sub>Your picks with their scores · the next prayer · your teams' matches, live · your apps</sub>
+
 </div>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/haven/clock.jpg" alt="Clock: a full-screen 4K photo with the time, the date and the next prayer"><br><sub><b>Clock</b>: 4K photos with the time, date and next prayer</sub></td>
+    <td width="50%"><img src="docs/haven/drawer.jpg" alt="The drawer: inputs, shortcuts, the weather and the markets"><br><sub><b>One press down</b>: inputs, shortcuts, weather and markets</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/haven/screensaver.jpg" alt="Screensaver: a pick's photo with its scores and the next prayer"><br><sub><b>Screensaver</b>: your picks, their scores and your next prayer</sub></td>
+    <td width="50%"><img src="docs/haven/settings.jpg" alt="Home Settings: prayer times, calculation method, Asr, mosque and match lines"><br><sub><b>Home Settings</b>: prayer times your way, or off</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/haven/movies.jpg" alt="The Movies tab: movies from your MDBList lists with their scores"><br><sub><b>Movies</b>: from your own lists, with IMDb and audience scores</sub></td>
+    <td width="50%" valign="middle" align="center"><b>Explore · Movies · Shows · YouTube · ↻</b><br><br><sub>A new set every 30 minutes, or right away with ↻.<br>YouTube shows the newest from your subscriptions.</sub></td>
+  </tr>
+</table>
 
 ---
 
